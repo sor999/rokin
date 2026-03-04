@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://coderabbit.ai/export/schema.json
+language: "ko-KR"
+early_access: false
+
+# 전역 프롬프트 설정 (가장 강력하게 강제되는 지침)
+tone_instructions: "리뷰는 객관적이고 논리적인 어조로, 철저히 코드 품질 향상에 초점을 맞춰 작성하세요. 불필요한 칭찬이나 감탄사는 완전히 배제하십시오. 코드의 안정성, 가독성, 유지보수성, 보안 및 스케일링 이슈에 중점을 두되, 구체적인 개선 코드 스니펫(Snippet)과 함께 타당한 이유를 제공하세요."
+
+reviews:
+  # 'chill' 프로필: 사소한 린팅 이슈로 인한 노이즈를 줄이고 버그, 취약점, 로직 결함 등 크리티컬한 문제에 집중
+  profile: "chill"
+  # 심각한 이슈가 발견되었을 경우, 자동으로 PR 상태를 'Request Changes'로 변경하여 머지(Merge) 방지
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # 상세 경로별 리뷰 지침 (Enterprise MSA 환경 맞춤형 세분화)
+  path_instructions:
+    # 1. 벡엔드 고성능 워커 (Go)
+    - path: "services/worker-go/**/*.go"
+      instructions: |
+        - Go Language Specification 및 Effective Go 패턴을 엄격히 적용할 것.
+        - Goroutine 누수(Leak), Race condition, 데드락 위험성을 최우선으로 검증할 것.
+        - 메모리 할당 빈도를 분석하여 불필요한 GC 오버헤드가 없는지, 포인터와 값 타입이 문맥에 맞게 쓰였는지 확인할 것.
+
+    # 2. 메인 비즈니스 API (Spring Boot)
+    - path: "services/api-spring/**/*.java"
+      instructions: |
+        - Spring Boot Best Practices(@Controller, @Service, @Repository 계층 분리) 준수 및 순환 참조 방지.
+        - JPA N+1 쿼리 발생 여부, 영속성 컨텍스트 생명주기 효율성 검증.
+        - 트랜잭션 경계(@Transactional)의 적절성과 체크/언체크 예외(Exception) 전파 및 롤백 전략의 안전성 검토.
+
+    # 3. 프론트엔드 대시보드 (Next.js)
+    - path: "services/dashboard-next/**/*.{ts,tsx}"
+      instructions: |
+        - App Router 패턴 내에서 Server/Client Component 경계가 적절하게 분리되었는지 확인.
+        - 렌더링 최적화를 위한 메모이제이션(useMemo, useCallback)의 오용 여부 짚어줄 것.
+        - React Hook의 의존성 배열(deps) 누락 여부 및 XSS 취약점 가능성(예: dangerouslySetInnerHTML) 확인.
+
+    # 4. 로봇 제어 노드 (ROS2)
+    - path: "services/robot-ros2/**/*.py"
+      instructions: |
+        - ROS2 Lifecycle, Executor 모델의 논리적 결함 위주로 리뷰.
+        - Publisher/Subscriber 통신 시 QoS 프로필 일치 여부 및 토픽 네이밍 컨벤션 통합 상태 확인.
+
+    # 5. 시스템 명세 및 스키마 (Contracts)
+    - path: "contracts/**/*.{yaml,yml,json}"
+      instructions: |
+        - OpenAPI/Swagger, JSON Schema 명세의 하위 호환성 파괴(Breaking Changes) 여부를 엄격하게 검증하여 클라이언트 장애를 예방할 것.
+
+    # 6. 인프라, CI/CD, 컨테이너 (DevOps & Security)
+    - path: "**/*.{tf,yaml,yml,Dockerfile,sh}"
+      instructions: |
+        - Dockerfile: Multi-stage 빌드 적용 여부, root 권한 실행 방지, 레이어 캐싱 효율 최적화.
+        - CI/CD 및 인프라 파일: 하드코딩된 Secret/Credential(비밀번호, 토큰 등) 노출 방지 및 최소 권한 원칙(IAM) 준수 여부 점검.
+
+    # 7. 테스트 코드 (Testing)
+    - path: "**/*{test,spec}.{go,java,ts,tsx,py}"
+      instructions: |
+        - 단위/통합 테스트가 경계값(Edge case) 및 핵심 예외 상황(Failure paths)을 적절히 커버하는지 검증.
+        - 모킹(Mocking)이 과도하게 사용되어 실제 로직 동작 검증에 방해가 되지 않는지(False positive) 확인.
+
+  auto_review:
+    drafts: false
+    base_branches:
+      # 프로덕션/스테이징/릴리즈에 병합 시 자동 리뷰 활성화
+      - "main"
+      - "develop"
+      - "release/*"
+
+  # 불필요한 리뷰 대상 제외 (비용 절감 및 리뷰 집중도 향상)
+  ignore_patterns:
+    - "**/node_modules/**"
+    - "**/vendor/**"
+    - "**/*.lock"
+    - "**/go.sum"
+    - "**/package-lock.json"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/target/**"
+    - "**/.venv/**"
+    - "**/.idea/**"
+    - "**/.vscode/**"
+
+chat:
+  auto_reply: true
