@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    robot_id: 'robot_1'
+    publish_rate_hz: 2.0
+    speed: 1.0
+    start_x: 0.0
+    start_y: 0.0
+    battery_drain_rate: 0.01
