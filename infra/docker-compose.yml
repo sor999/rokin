@@ -12,6 +12,8 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - robot_net
     restart: always
 
   zookeeper:
@@ -22,6 +24,8 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    networks:
+      - robot_net
 
   kafka:
     image: confluentinc/cp-kafka:7.4.3
@@ -39,6 +43,26 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - robot_net
+
+  fake_robot:
+    build:
+      context: ../ros
+    container_name: robot_fake_nodes
+    depends_on:
+      - kafka
+    environment:
+      - ROS_DOMAIN_ID=0
+      - ROS_LOCALHOST_ONLY=1
+    # demo.launch.py를 기본 명령어로 실행
+    command: ["ros2", "launch", "fake_robot", "demo.launch.py"]
+    networks:
+      - robot_net
+
+networks:
+  robot_net:
+    driver: bridge
 
 volumes:
   postgres_data:

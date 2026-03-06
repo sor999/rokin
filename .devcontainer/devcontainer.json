@@ -1,0 +1,34 @@
+{
+  "name": "ROS 2 Humble Dev Environment",
+  "dockerFile": "../ros/Dockerfile",
+  "context": "..",
+  "workspaceFolder": "/ros_ws",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "python.autoComplete.extraPaths": [
+            "/opt/ros/humble/lib/python3.10/site-packages",
+            "/ros_ws/install/fake_robot/lib/python3.10/site-packages"
+        ],
+        "python.analysis.extraPaths": [
+            "/opt/ros/humble/lib/python3.10/site-packages",
+            "/ros_ws/install/fake_robot/lib/python3.10/site-packages"
+        ],
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash",
+            "args": ["-l"]
+          }
+        },
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-iot.vscode-ros"
+      ]
+    }
+  },
+  "remoteUser": "root",
+  "postCreateCommand": "sudo apt update && sudo apt install -y python3-colcon-common-extensions"
+}

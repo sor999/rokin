@@ -46,7 +46,46 @@ chmod +x infra/kafka/topic-init.sh
 - `cmd.robot`
 - `ack.robot`
 
-## 4. 서비스 정지
+## 4. ROS2 가상 로봇(fake_robot) 실행
+
+fake_robot 서비스를 빌드하고 실행합니다.
+
+```bash
+docker compose -f infra/docker-compose.yml up fake_robot --build
+```
+
+3개의 로봇 노드(`robot_1`, `robot_2`, `robot_3`)가 컨테이너 내부에서 실행됩니다.
+
+### 토픽 확인 및 테스트
+
+로봇 노드는 Docker 컨테이너 안에서 실행되므로, `ros2` 명령어도 컨테이너 안에서 실행해야 합니다.
+
+```bash
+# 컨테이너 쉘 접속
+docker exec -it robot_fake_nodes bash
+source /opt/ros/humble/setup.bash
+
+# 토픽 목록 확인
+ros2 topic list
+
+# Pose 데이터 수신
+ros2 topic echo /fleet/robot_1/pose
+
+# 배터리 데이터 수신
+ros2 topic echo /fleet/robot_1/battery
+
+# 상태 데이터 수신
+ros2 topic echo /fleet/robot_1/status
+
+# move_to 명령 전송
+ros2 topic pub --once /fleet/robot_1/cmd std_msgs/msg/String \
+  '{"data": "{\"cmd_id\":\"test-1\",\"command\":\"move_to\",\"data\":{\"x\":3.0,\"y\":4.0}}"}'
+
+# ACK 수신 확인 (accepted → done)
+ros2 topic echo /fleet/robot_1/ack
+```
+
+## 5. 서비스 정지
 
 인프라를 정지하려면 다음 명령어를 실행합니다.
 
