@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     git \
  && rm -rf /var/lib/apt/lists/*
 
-# 파이썬 의존성 설치 (추후 필요한 라이브러리 추가)
-# RUN pip3 install <dependencies>
+# 파이썬 의존성 설치
+RUN pip3 install confluent-kafka==2.6.1
 
 # 작업 디렉토리 생성
 WORKDIR /ros_ws
