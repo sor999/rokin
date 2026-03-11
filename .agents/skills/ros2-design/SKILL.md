@@ -52,3 +52,6 @@ entry_points={
     ],
 },
 ```
+## 4. 코드 주석 (Code Comments)
+- 기본적으로 Python `Docstring` 관례를 따릅니다.
+- 상세한 주석 작성 규칙(섹션 구분, 언어 등)은 [공통 주석 컨벤션](../../comment-conventions/SKILL.md)을 준수하세요.

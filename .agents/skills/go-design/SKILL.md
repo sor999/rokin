@@ -43,3 +43,7 @@ robot-platform/
 
 4. **의존성 주입 (Dependency Injection)**:
    - 구조체(Struct)와 인터페이스(Interface)를 활용하여 `internal/handler`가 `internal/repository`와 `internal/kafka`를 느슨하게 참조하게 만드세요. 코드 테스트 작성을 매우 쉽게 만들어 줍니다.
+
+## 5. 코드 주석 (Code Comments)
+- Go의 표준 `Godoc` 관례를 따릅니다. (선언 바로 위 `//` 주석)
+- 상세한 주석 작성 규칙(섹션 구분 등)은 [공통 주석 컨벤션](../../comment-conventions/SKILL.md)을 준수하세요.

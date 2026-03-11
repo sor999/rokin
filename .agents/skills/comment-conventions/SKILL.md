@@ -43,31 +43,60 @@ def destroy_node(self) -> None:
 # === 생명주기 ===
 ```
 
-## 2. 함수/클래스 Docstring
+## 2. 언어별 문서화 주석 (Doc Comments)
 
-공개 메서드와 클래스에는 **한 줄 또는 멀티라인 docstring**을 사용합니다.
-섹션 주석과 달리 docstring은 삭제하지 않습니다.
+함수, 클래스, 인터페이스 등의 선언부 위에는 해당 언어의 관례에 맞는 **문서화 주석**을 작성합니다. 모든 언어에서 **간결함**을 유지하며, 불필요한 장식용 기호는 배제합니다.
 
+### Python (Docstring)
+- `""" ... """` 형식을 사용합니다.
 ```python
-def _make_envelope(self, robot_id: str, msg_type: str, data: dict) -> dict:
+def make_envelope(data: dict) -> dict:
     """공통 Telemetry Envelope를 생성한다."""
     ...
-
-class RosKafkaBridgeNode(Node):
-    """ROS2 ↔ Kafka 데이터 브릿지 노드.
-
-    - ROS → Kafka (Telemetry): pose / battery / status / ack 토픽을 Kafka로 Produce
-    - Kafka → ROS (Command): cmd.robot 토픽을 Consume해 각 로봇의 /fleet/{robot_id}/cmd 로 Relay
-    """
 ```
 
-## 3. 적용 범위
+### Go (Godoc)
+- 선언 바로 위에 `//`로 시작하는 주석을 작성합니다. 주석은 해당 식별자의 이름으로 시작하는 것이 관례입니다.
+```go
+// NewProducer 는 카프카 프로듀서 인스턴스를 생성합니다.
+func NewProducer(broker string) *Producer {
+    ...
+}
+```
 
-이 규칙은 언어에 관계없이 프로젝트 전체에 적용됩니다.
+### Java / Kotlin (Javadoc/KDoc)
+- `/** ... */` 형식을 사용하며, 표준 태그(@param, @return 등)는 꼭 필요한 경우에만 최소한으로 사용합니다.
+```java
+/**
+ * 로봇의 현재 상태를 DB에 저장합니다.
+ */
+public void saveStatus(RobotStatus status) {
+    ...
+}
+```
 
-| 언어 | 섹션 주석 형식 |
-|---|---|
-| Python | `# 섹션명` |
-| Go | `// 섹션명` |
-| Java/Kotlin | `// 섹션명` |
-| TypeScript/JS | `// 섹션명` |
+### TypeScript / JavaScript (JSDoc)
+- `/** ... */` 형식을 사용합니다.
+```typescript
+/**
+ * 지도 위에 로봇 마커를 렌더링합니다.
+ * @param robotId 로봇 고유 식별자
+ */
+const renderMarker = (robotId: string) => {
+    ...
+}
+```
+
+## 3. 적용 범위 및 요약
+
+이 규칙은 프로젝트 전체에 적용됩니다. 주석 작성 시 아래 표를 참고하세요.
+
+| 언어 | 인라인 섹션 주석 (`#1`) | 문서화 주석 (Doc Comments) |
+|---|---|---|
+| **Python** | `# 섹션명` | `""" Docstring """` |
+| **Go** | `// 섹션명` | `// Godoc` |
+| **Java/Kotlin** | `// 섹션명` | `/** Javadoc/KDoc */` |
+| **TypeScript/JS** | `// 섹션명` | `/** JSDoc */` |
+
+> [!IMPORTANT]
+> 어떤 언어를 사용하더라도 코드 블록 구분을 위해 `// ---` 나 `// ===` 같은 구분선을 사용하는 것은 금지됩니다. 공백과 간단한 텍스트 주석만으로 섹션을 구분하세요.

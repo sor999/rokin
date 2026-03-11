@@ -58,3 +58,6 @@ robot-platform/
 6. **환경 변수 (Environment Variables)**:
    - 클라이언트(브라우저) 환경에 노출되어야 하는 환경 변수(예: 외부 API URL, WebSocket 주소)는 반드시 `NEXT_PUBLIC_` 접두사를 붙여 정의합니다 (예: `NEXT_PUBLIC_API_URL`).
    - 환경 변수 타입 검증을 위해 `env.mjs` (또는 Zod)를 도입하는 것을 적극 고려하세요.
+## 7. 코드 주석 (Code Comments)
+- TypeScript/JS의 표준 `JSDoc` 관례를 따릅니다.
+- 상세한 주석 작성 규칙 및 섹션 스타일은 [공통 주석 컨벤션](../../comment-conventions/SKILL.md)을 준수하세요.
