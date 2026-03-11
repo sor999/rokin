@@ -26,7 +26,7 @@ class KafkaCommandConsumer:
             'bootstrap.servers': broker,
             'group.id': group_id,
             'auto.offset.reset': 'latest',
-            'enable.auto.commit': True,
+            'enable.auto.commit': False,  # 수동 커밋 사용 (At-least-once 보장)
         }
         self._topic = topic
         self._on_message = on_message
@@ -64,11 +64,16 @@ class KafkaCommandConsumer:
                 try:
                     value = json.loads(msg.value().decode('utf-8'))
                     self._on_message(value)
+                    # 성공적으로 처리된 경우에만 오프셋 커밋
+                    consumer.commit(asynchronous=False)
                 except (json.JSONDecodeError, UnicodeDecodeError) as e:
                     logger.warning(f"[Consumer] 메시지 파싱 실패: {e}")
-                except Exception as e:
-                    logger.error(f"[Consumer] 콜백 처리 중 예외 발생: {e}")
-        except KafkaException as e:
-            logger.error(f"[Consumer] 치명적 Kafka 오류: {e}")
+                    # 파싱 실패한 메시지는 다시 시도해도 실패할 것이므로 커밋하여 넘김 (필요 시 DLQ 처리)
+                    consumer.commit(asynchronous=False)
+                except Exception:
+                    logger.exception("[Consumer] 콜백 처리 중 예외 발생")
+                    # 처리 실패 시 커밋하지 않음 -> 재시작 시 해당 메시지부터 다시 읽음
+        except KafkaException:
+            logger.exception("[Consumer] 치명적 Kafka 오류 발생")
         finally:
             consumer.close()
