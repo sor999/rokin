@@ -63,4 +63,4 @@ robot-platform/
 - [테스트 컨벤션 및 픽스처 상세 가이드 보기 (`test-conventions.md`)](test-conventions.md)
 ## 4. 코드 주석 (Code Comments)
 - Java/Kotlin의 표준 `Javadoc/KDoc` 관례를 따릅니다.
-- 상세한 주석 작성 규칙(섹션 구분, 일관된 스타일)은 [공통 주석 컨벤션](../../comment-conventions/SKILL.md)을 준수하세요.
+- 상세한 주석 작성 규칙(섹션 구분, 일관된 스타일)은 [공통 주석 컨벤션](../comment-conventions/SKILL.md)을 준수하세요.
