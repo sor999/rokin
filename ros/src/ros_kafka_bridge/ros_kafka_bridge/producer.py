@@ -20,17 +20,28 @@ class KafkaTelemetryProducer:
             key: 파티션 라우팅에 쓰일 키 (보통 robot_id)
             value: JSON 직렬화 가능한 dict (Envelope 포함)
         """
-        try:
-            self._producer.produce(
-                topic=topic,
-                key=key.encode('utf-8'),
-                value=json.dumps(value).encode('utf-8'),
-                on_delivery=self._delivery_callback,
-            )
-            # 이벤트 큐 처리 (non-blocking)
-            self._producer.poll(0)
-        except KafkaException as e:
-            logger.error(f"[Producer] Kafka produce 실패 (topic={topic}, key={key}): {e}")
+        retries = 3
+        while retries > 0:
+            try:
+                self._producer.produce(
+                    topic=topic,
+                    key=key.encode('utf-8'),
+                    value=json.dumps(value).encode('utf-8'),
+                    on_delivery=self._delivery_callback,
+                )
+                # 이벤트 큐 처리 (non-blocking)
+                self._producer.poll(0)
+                return
+            except BufferError:
+                # 로컬 큐 포화 시 poll()로 큐를 비우고 재시도
+                logger.warning(f"[Producer] 로컬 큐 포화, 재시도 중... (남은 횟수: {retries-1})")
+                self._producer.poll(0.1)
+                retries -= 1
+            except Exception:
+                logger.exception(f"[Producer] Kafka produce 중 예외 발생 (topic={topic}, key={key})")
+                return
+
+        logger.error(f"[Producer] 재시도 횟수 초과로 메시지 전송 실패 (topic={topic}, key={key})")
 
     def flush(self, timeout: float = 5.0) -> None:
         """버퍼에 남은 메시지를 모두 전송한다."""
