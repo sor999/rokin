@@ -23,9 +23,13 @@
 - **대상 작업:** `services/dashboard-next/`, React 컴포넌트, App Router, Tailwind CSS, 상태 관리, 지도 마커 및 궤적 렌더링
 - **참고 문서:** `.agents/skills/nextjs-design/SKILL.md`
 
-### 4. 🔗 Git 및 협업 컨벤션
+### 5. 🔗 Git 및 협업 컨벤션
 - **대상 작업:** 브랜치 생성, 커밋 메시지 작성, PR 생성, 코드 리뷰 관련 작업
 - **참고 문서:** `.agents/skills/git-conventions/SKILL.md`
+
+### 6. 💬 코드 주석 컨벤션
+- **대상 작업:** 모든 소스 파일의 인라인 주석, 섹션 구분 주석 작성
+- **참고 문서:** `.agents/skills/comment-conventions/SKILL.md`
 
 ---
 
