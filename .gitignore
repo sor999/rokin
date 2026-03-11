@@ -67,4 +67,5 @@ ENV/
 install/
 log/
 
+.claude
 plan.md

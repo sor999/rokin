@@ -1,0 +1,11 @@
+ros_kafka_bridge_node:
+  ros__parameters:
+    # Kafka 브로커 주소 (Docker 내부 서비스명 사용)
+    kafka_broker: "kafka:29092"
+    # Consumer 그룹 ID
+    kafka_group_id: "ros_kafka_bridge"
+    # 브릿지가 구독/발행할 로봇 ID 목록
+    robot_ids:
+      - "robot_1"
+      - "robot_2"
+      - "robot_3"

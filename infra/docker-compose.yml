@@ -43,6 +43,12 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     networks:
       - robot_net
 
@@ -51,12 +57,13 @@ services:
       context: ../ros
     container_name: robot_fake_nodes
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       - ROS_DOMAIN_ID=0
-      - ROS_LOCALHOST_ONLY=1
-    # demo.launch.py를 기본 명령어로 실행
-    command: ["ros2", "launch", "fake_robot", "demo.launch.py"]
+      # ROS_LOCALHOST_ONLY 해제: 브릿지 노드와 동일 컨테이너 내 DDS 통신
+    # fake_robot 3대 + ros_kafka_bridge를 함께 기동하는 통합 launch 파일 사용
+    command: ["ros2", "launch", "ros_kafka_bridge", "full_demo.launch.py"]
     networks:
       - robot_net
 

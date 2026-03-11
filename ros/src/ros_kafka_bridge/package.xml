@@ -1,15 +1,19 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>fake_robot</name>
+  <name>ros_kafka_bridge</name>
   <version>0.0.0</version>
-  <description>Simulated robot node modeling movement and battery usage.</description>
+  <description>ROS2-Kafka 브릿지: 텔레메트리 데이터를 Kafka로 produce하고, Kafka 명령을 ROS 토픽으로 전달합니다.</description>
   <maintainer email="sorsor999@naver.com">sor999</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>fake_robot</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
