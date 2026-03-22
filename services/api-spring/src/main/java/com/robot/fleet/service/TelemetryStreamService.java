@@ -42,19 +42,36 @@ public class TelemetryStreamService {
 
     public void broadcast(TelemetryEventDto event) {
         lastSeenMap.put(event.robotId(), event.occurredAt());
+        String data;
         try {
-            String data = objectMapper.writeValueAsString(event);
-            List<SseEmitter> dead = new ArrayList<>();
-            for (SseEmitter emitter : emitters) {
-                try {
-                    emitter.send(SseEmitter.event().name("robot_update").data(data));
-                } catch (Exception e) {
-                    dead.add(emitter);
-                }
-            }
-            emitters.removeAll(dead);
+            data = objectMapper.writeValueAsString(event);
         } catch (Exception e) {
-            log.error("[SSE] broadcast 직렬화 실패", e);
+            log.warn("[SSE] broadcast 직렬화 실패: {}", e.getMessage());
+            return; // 직렬화 실패 시 예외 전파 없이 해당 브로드캐스트만 중단
         }
+        
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().name("robot_update").data(data));
+            } catch (Exception e) {
+                dead.add(emitter);
+            }
+        }
+        emitters.removeAll(dead);
+    }
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedRateString = "${fleet.sse-ping-ms:15000}")
+    public void sendPing() {
+        if (emitters.isEmpty()) return;
+        List<SseEmitter> dead = new ArrayList<>();
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event().comment("ping"));
+            } catch (Exception e) {
+                dead.add(emitter);
+            }
+        }
+        emitters.removeAll(dead);
     }
 }
