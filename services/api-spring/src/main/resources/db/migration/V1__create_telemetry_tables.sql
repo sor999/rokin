@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS telemetry_pose (
     robot_id   VARCHAR(64)  NOT NULL,
     x          DOUBLE PRECISION NOT NULL,
     y          DOUBLE PRECISION NOT NULL,
-    created_at TIMESTAMPTZ  DEFAULT NOW()
+    created_at TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_pose_robot_id  ON telemetry_pose (robot_id);
@@ -20,7 +21,8 @@ CREATE TABLE IF NOT EXISTS telemetry_battery (
     timestamp  TIMESTAMPTZ  NOT NULL,
     robot_id   VARCHAR(64)  NOT NULL,
     level      REAL         NOT NULL,
-    created_at TIMESTAMPTZ  DEFAULT NOW()
+    created_at TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_battery_robot_id ON telemetry_battery (robot_id);
@@ -31,7 +33,8 @@ CREATE TABLE IF NOT EXISTS telemetry_status (
     timestamp  TIMESTAMPTZ  NOT NULL,
     robot_id   VARCHAR(64)  NOT NULL,
     state      VARCHAR(32)  NOT NULL,
-    created_at TIMESTAMPTZ  DEFAULT NOW()
+    created_at TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_status_robot_id ON telemetry_status (robot_id);
@@ -43,8 +46,9 @@ CREATE TABLE IF NOT EXISTS robot_ack (
     robot_id   VARCHAR(64)  NOT NULL,
     status     VARCHAR(16)  NOT NULL,
     message    TEXT,
-    created_at TIMESTAMPTZ  DEFAULT NOW()
+    created_at TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_ack_cmd_id   ON robot_ack (cmd_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_ack_dedup ON robot_ack (cmd_id, status, timestamp);
+-- 복합 유니크 제약(cmd_id, status, timestamp) 삭제: 순수 로그성 삽입 성능 향상
