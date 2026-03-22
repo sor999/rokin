@@ -23,49 +23,44 @@ public class TelemetryKafkaListener {
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
 
+    private void parseAndBroadcast(String payload, String type, java.util.function.Function<JsonNode, TelemetryEventDto> parser) {
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            TelemetryEventDto event = parser.apply(root);
+            streamService.broadcast(event);
+        } catch (Exception e) {
+            log.warn("[Listener] {} 파싱/브로드캐스트 실패: {}", type, e.getMessage());
+        }
+    }
+
     @KafkaListener(topics = "telemetry.pose", groupId = "api-sse-broadcaster")
     public void onPose(String payload) {
-        try {
-            JsonNode node = objectMapper.readTree(payload);
-            streamService.broadcast(TelemetryEventDto.of(
-                    "pose",
-                    node.get("robot_id").asText(),
-                    OffsetDateTime.parse(node.get("timestamp").asText()),
-                    Map.of("x", node.get("data").get("x").asDouble(), "y", node.get("data").get("y").asDouble())
-            ));
-        } catch (Exception e) {
-            log.warn("[Listener] pose 파싱 실패: {}", e.getMessage());
-        }
+        parseAndBroadcast(payload, "pose", root -> TelemetryEventDto.of(
+                "pose",
+                root.get("robot_id").asText(),
+                OffsetDateTime.parse(root.get("timestamp").asText()),
+                Map.of("x", root.get("data").get("x").asDouble(), "y", root.get("data").get("y").asDouble())
+        ));
     }
 
     @KafkaListener(topics = "telemetry.battery", groupId = "api-sse-broadcaster")
     public void onBattery(String payload) {
-        try {
-            JsonNode node = objectMapper.readTree(payload);
-            streamService.broadcast(TelemetryEventDto.of(
-                    "battery",
-                    node.get("robot_id").asText(),
-                    OffsetDateTime.parse(node.get("timestamp").asText()),
-                    Map.of("level", node.get("data").get("level").asDouble())
-            ));
-        } catch (Exception e) {
-            log.warn("[Listener] battery 파싱 실패: {}", e.getMessage());
-        }
+        parseAndBroadcast(payload, "battery", root -> TelemetryEventDto.of(
+                "battery",
+                root.get("robot_id").asText(),
+                OffsetDateTime.parse(root.get("timestamp").asText()),
+                Map.of("level", root.get("data").get("level").asDouble())
+        ));
     }
 
     @KafkaListener(topics = "telemetry.status", groupId = "api-sse-broadcaster")
     public void onStatus(String payload) {
-        try {
-            JsonNode node = objectMapper.readTree(payload);
-            streamService.broadcast(TelemetryEventDto.of(
-                    "status",
-                    node.get("robot_id").asText(),
-                    OffsetDateTime.parse(node.get("timestamp").asText()),
-                    Map.of("state", node.get("data").get("state").asText())
-            ));
-        } catch (Exception e) {
-            log.warn("[Listener] status 파싱 실패: {}", e.getMessage());
-        }
+        parseAndBroadcast(payload, "status", root -> TelemetryEventDto.of(
+                "status",
+                root.get("robot_id").asText(),
+                OffsetDateTime.parse(root.get("timestamp").asText()),
+                Map.of("state", root.get("data").get("state").asText())
+        ));
     }
 
     @KafkaListener(topics = "ack.robot", groupId = "api-ack-broadcaster")
