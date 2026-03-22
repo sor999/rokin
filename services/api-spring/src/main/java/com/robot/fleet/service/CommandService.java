@@ -33,8 +33,14 @@ public class CommandService {
             payload.put("issued_by", request.getIssuedBy());
 
             String json = objectMapper.writeValueAsString(payload);
-            kafkaTemplate.send("cmd.robot", request.getRobotId(), json);
-            log.info("[Command] Kafka 발행 | robotId={} cmdId={} command={}", request.getRobotId(), cmdId, request.getCommand());
+            kafkaTemplate.send("cmd.robot", request.getRobotId(), json)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("[Command] Kafka 발행 실패 | robotId={} cmdId={} error={}", request.getRobotId(), cmdId, ex.getMessage());
+                    } else {
+                        log.info("[Command] Kafka 발행 성공 | robotId={} cmdId={} command={}", request.getRobotId(), cmdId, request.getCommand());
+                    }
+                });
         } catch (Exception e) {
             throw new IllegalStateException("명령 직렬화 실패", e);
         }
