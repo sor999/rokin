@@ -147,7 +147,6 @@ func (h *Handler) registerMessage(msg kafkapkg.Message) {
 
 func (h *Handler) markProcessed(msg kafkapkg.Message) {
 	h.commitMu.Lock()
-	defer h.commitMu.Unlock()
 
 	key := commitKey(msg.Topic, msg.Partition)
 	state, ok := h.commitState[key]
@@ -172,13 +171,17 @@ func (h *Handler) markProcessed(msg kafkapkg.Message) {
 	}
 
 	if commitOffset >= 0 {
-		if err := h.consumer.Commit(msg.Topic, msg.Partition, commitOffset); err != nil {
-			log.Printf("[Commit] 오프셋 커밋 실패 | topic=%s partition=%d offset=%d err=%v", msg.Topic, msg.Partition, commitOffset, err)
-			return
-		}
 		for state.nextOffset <= commitOffset {
 			delete(state.completed, state.nextOffset)
 			state.nextOffset++
+		}
+	}
+	h.commitMu.Unlock() // Unlock BEFORE network IO to prevent blocking all partitions
+
+	if commitOffset >= 0 {
+		if err := h.consumer.Commit(msg.Topic, msg.Partition, commitOffset); err != nil {
+			log.Printf("[Commit] 오프셋 커밋 실패 | topic=%s partition=%d offset=%d err=%v", msg.Topic, msg.Partition, commitOffset, err)
+			return
 		}
 		log.Printf("[Commit] 오프셋 커밋 완료 | topic=%s partition=%d offset=%d", msg.Topic, msg.Partition, commitOffset)
 	}
@@ -196,15 +199,22 @@ func (h *Handler) runPoseBatcher(ctx context.Context) {
 	var buf []repository.PoseRow
 	var msgs []kafkapkg.Message
 
-	flush := func() {
+	flush := func(isShutdown bool) {
 		if len(buf) == 0 {
 			return
 		}
 
-		// DB 적재 실패 시 재시도 (최대 3회)
+		flushCtx := ctx
+		if isShutdown {
+			// 종료 시 남은 데이터를 안전하게 플러시하기 위해 백그라운드 컨텍스트 타임아웃 사용
+			var cancel context.CancelFunc
+			flushCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+		}
+
 		var err error
 		for i := 0; i < 3; i++ {
-			if err = h.repo.BatchInsertPose(ctx, buf); err == nil {
+			if err = h.repo.BatchInsertPose(flushCtx, buf); err == nil {
 				log.Printf("[Batcher/pose] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
@@ -214,12 +224,8 @@ func (h *Handler) runPoseBatcher(ctx context.Context) {
 				return
 			}
 			log.Printf("[Batcher/pose] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
-			time.Sleep(time.Second * time.Duration(i+1))
+			time.Sleep(time.Duration(1<<i) * time.Second) // exponential backoff: 1s, 2s, 4s
 		}
-
-		// 최종 실패 시 버퍼를 비우지 않고 다음 flush 때 재시도하거나,
-		// 심각한 경우 여기서 리턴하여 고루틴을 종료(재시작 유도)할 수 있음.
-		// 여기서는 유실 방지를 위해 버퍼를 유지함 (단, 큐가 계속 쌓일 위험 주의)
 		log.Printf("[Batcher/pose] 치명적: DB 적재 최종 실패. 버퍼 유지.")
 	}
 
@@ -227,7 +233,7 @@ func (h *Handler) runPoseBatcher(ctx context.Context) {
 		select {
 		case msg, ok := <-h.poseCh:
 			if !ok {
-				flush()
+				flush(true)
 				return
 			}
 			row, err := parsePose(msg.Payload)
@@ -242,12 +248,12 @@ func (h *Handler) runPoseBatcher(ctx context.Context) {
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
 			if len(buf) >= h.batchSize {
-				flush()
+				flush(false)
 			}
 		case <-ticker.C:
-			flush()
+			flush(false)
 		case <-ctx.Done():
-			flush()
+			flush(true)
 			return
 		}
 	}
@@ -261,14 +267,20 @@ func (h *Handler) runBatteryBatcher(ctx context.Context) {
 	var buf []repository.BatteryRow
 	var msgs []kafkapkg.Message
 
-	flush := func() {
+	flush := func(isShutdown bool) {
 		if len(buf) == 0 {
 			return
+		}
+		flushCtx := ctx
+		if isShutdown {
+			var cancel context.CancelFunc
+			flushCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 		}
 
 		var err error
 		for i := 0; i < 3; i++ {
-			if err = h.repo.BatchInsertBattery(ctx, buf); err == nil {
+			if err = h.repo.BatchInsertBattery(flushCtx, buf); err == nil {
 				log.Printf("[Batcher/battery] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
@@ -278,7 +290,7 @@ func (h *Handler) runBatteryBatcher(ctx context.Context) {
 				return
 			}
 			log.Printf("[Batcher/battery] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
-			time.Sleep(time.Second * time.Duration(i+1))
+			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
 		log.Printf("[Batcher/battery] 치명적: DB 적재 최종 실패. 버퍼 유지.")
 	}
@@ -287,7 +299,7 @@ func (h *Handler) runBatteryBatcher(ctx context.Context) {
 		select {
 		case msg, ok := <-h.batteryCh:
 			if !ok {
-				flush()
+				flush(true)
 				return
 			}
 			row, err := parseBattery(msg.Payload)
@@ -302,12 +314,12 @@ func (h *Handler) runBatteryBatcher(ctx context.Context) {
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
 			if len(buf) >= h.batchSize {
-				flush()
+				flush(false)
 			}
 		case <-ticker.C:
-			flush()
+			flush(false)
 		case <-ctx.Done():
-			flush()
+			flush(true)
 			return
 		}
 	}
@@ -321,14 +333,20 @@ func (h *Handler) runStatusBatcher(ctx context.Context) {
 	var buf []repository.StatusRow
 	var msgs []kafkapkg.Message
 
-	flush := func() {
+	flush := func(isShutdown bool) {
 		if len(buf) == 0 {
 			return
+		}
+		flushCtx := ctx
+		if isShutdown {
+			var cancel context.CancelFunc
+			flushCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 		}
 
 		var err error
 		for i := 0; i < 3; i++ {
-			if err = h.repo.BatchInsertStatus(ctx, buf); err == nil {
+			if err = h.repo.BatchInsertStatus(flushCtx, buf); err == nil {
 				log.Printf("[Batcher/status] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
@@ -338,7 +356,7 @@ func (h *Handler) runStatusBatcher(ctx context.Context) {
 				return
 			}
 			log.Printf("[Batcher/status] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
-			time.Sleep(time.Second * time.Duration(i+1))
+			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
 		log.Printf("[Batcher/status] 치명적: DB 적재 최종 실패. 버퍼 유지.")
 	}
@@ -347,7 +365,7 @@ func (h *Handler) runStatusBatcher(ctx context.Context) {
 		select {
 		case msg, ok := <-h.statusCh:
 			if !ok {
-				flush()
+				flush(true)
 				return
 			}
 			row, err := parseStatus(msg.Payload)
@@ -362,12 +380,12 @@ func (h *Handler) runStatusBatcher(ctx context.Context) {
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
 			if len(buf) >= h.batchSize {
-				flush()
+				flush(false)
 			}
 		case <-ticker.C:
-			flush()
+			flush(false)
 		case <-ctx.Done():
-			flush()
+			flush(true)
 			return
 		}
 	}
@@ -381,14 +399,20 @@ func (h *Handler) runAckBatcher(ctx context.Context) {
 	var buf []repository.AckRow
 	var msgs []kafkapkg.Message
 
-	flush := func() {
+	flush := func(isShutdown bool) {
 		if len(buf) == 0 {
 			return
+		}
+		flushCtx := ctx
+		if isShutdown {
+			var cancel context.CancelFunc
+			flushCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 		}
 
 		var err error
 		for i := 0; i < 3; i++ {
-			if err = h.repo.BatchInsertAck(ctx, buf); err == nil {
+			if err = h.repo.BatchInsertAck(flushCtx, buf); err == nil {
 				log.Printf("[Batcher/ack] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
@@ -398,7 +422,7 @@ func (h *Handler) runAckBatcher(ctx context.Context) {
 				return
 			}
 			log.Printf("[Batcher/ack] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
-			time.Sleep(time.Second * time.Duration(i+1))
+			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
 		log.Printf("[Batcher/ack] 치명적: DB 적재 최종 실패. 버퍼 유지.")
 	}
@@ -407,7 +431,7 @@ func (h *Handler) runAckBatcher(ctx context.Context) {
 		select {
 		case msg, ok := <-h.ackCh:
 			if !ok {
-				flush()
+				flush(true)
 				return
 			}
 			row, err := parseAck(msg.Payload)
@@ -422,12 +446,12 @@ func (h *Handler) runAckBatcher(ctx context.Context) {
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
 			if len(buf) >= h.batchSize {
-				flush()
+				flush(false)
 			}
 		case <-ticker.C:
-			flush()
+			flush(false)
 		case <-ctx.Done():
-			flush()
+			flush(true)
 			return
 		}
 	}
