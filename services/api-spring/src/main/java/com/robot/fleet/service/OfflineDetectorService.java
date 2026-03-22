@@ -26,7 +26,7 @@ public class OfflineDetectorService {
         return lastSeen.isBefore(OffsetDateTime.now().minusSeconds(thresholdSeconds));
     }
 
-    @Scheduled(fixedDelayString = "${fleet.offline-check-ms:5000}")
+    @Scheduled(fixedRateString = "${fleet.offline-check-ms:5000}", initialDelayString = "${fleet.offline-initial-delay:1000}")
     public void detectOfflineRobots() {
         OffsetDateTime threshold = OffsetDateTime.now().minusSeconds(thresholdSeconds);
         for (Map.Entry<String, OffsetDateTime> entry : streamService.getLastSeenMap().entrySet()) {
