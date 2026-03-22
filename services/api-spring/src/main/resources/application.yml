@@ -1,0 +1,45 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:telemetry}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKER_URL:localhost:9092}
+    consumer:
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # 파티션 선택 전략 명시: 키(robotId) 기반으로 결정하여 같은 로봇의 순서를 보장
+      properties:
+        partitioner.class: org.apache.kafka.clients.producer.internals.DefaultPartitioner
+
+fleet:
+  offline-threshold-seconds: 30
+  offline-check-ms: 5000
+
+logging:
+  level:
+    com.robot.fleet: INFO
+    org.springframework.kafka: WARN
