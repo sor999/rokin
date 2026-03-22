@@ -31,6 +31,9 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # 파티션 선택 전략 명시: 키(robotId) 기반으로 결정하여 같은 로봇의 순서를 보장
+      properties:
+        partitioner.class: org.apache.kafka.clients.producer.internals.DefaultPartitioner
 
 fleet:
   offline-threshold-seconds: 30
