@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.dto.TelemetryEventDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -61,7 +63,7 @@ public class TelemetryStreamService {
         emitters.removeAll(dead);
     }
 
-    @org.springframework.scheduling.annotation.Scheduled(fixedRateString = "${fleet.sse-ping-ms:15000}")
+    @Scheduled(fixedRateString = "${fleet.sse-ping-ms:15000}")
     public void sendPing() {
         if (emitters.isEmpty()) return;
         List<SseEmitter> dead = new ArrayList<>();
