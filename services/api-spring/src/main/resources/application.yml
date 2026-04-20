@@ -43,3 +43,4 @@ logging:
   level:
     com.robot.fleet: INFO
     org.springframework.kafka: WARN
+    org.apache.kafka: ERROR

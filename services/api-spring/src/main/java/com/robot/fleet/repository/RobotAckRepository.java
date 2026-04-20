@@ -4,7 +4,8 @@ import com.robot.fleet.domain.RobotAck;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface RobotAckRepository extends JpaRepository<RobotAck, Long> {
-    List<RobotAck> findByCmdIdOrderByOccurredAtDesc(String cmdId);
+    List<RobotAck> findByCmdIdOrderByOccurredAtDesc(UUID cmdId);
 }

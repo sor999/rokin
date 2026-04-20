@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "robot_ack")
@@ -18,7 +19,7 @@ public class RobotAck extends BaseTimeEntity {
     private Long id;
 
     @Column(name = "cmd_id", nullable = false)
-    private String cmdId;
+    private UUID cmdId;
 
     @Column(name = "timestamp", nullable = false)
     private OffsetDateTime occurredAt;

@@ -62,6 +62,8 @@ wheels/
 venv/
 env/
 ENV/
+!services/dashboard-next/src/lib/
+!services/dashboard-next/src/lib/**
 
 # ROS2 specific
 install/
