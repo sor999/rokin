@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "telemetry_pose")
@@ -18,7 +19,7 @@ public class TelemetryPose extends BaseTimeEntity {
     private Long id;
 
     @Column(name = "event_id", unique = true, nullable = false)
-    private String eventId;
+    private UUID eventId;
 
     @Column(name = "timestamp", nullable = false)
     private OffsetDateTime occurredAt;
