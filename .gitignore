@@ -6,6 +6,7 @@
 .vscode/
 *.log
 tmp/
+.dev-pids
 .env
 .env.*
 !.env.example
