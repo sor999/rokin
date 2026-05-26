@@ -3,13 +3,16 @@
 로봇 텔레메트리 수집, 저장, 실시간 스트리밍, 제어 명령 전송을 한 저장소에서 다루는 모노레포입니다.  
 ROS2 기반 가상 로봇이 텔레메트리를 발행하면 Kafka를 통해 Go Worker와 Spring API가 이를 처리하고, Next.js 대시보드가 실시간 상태 조회와 명령 전송 UI를 제공합니다.
 
-## 한눈에 보기
+## 요약
+
+<img width="1692" height="812" alt="스크린샷 2026-05-25 오후 5 11 12" src="https://github.com/user-attachments/assets/5b9c0be9-a5fe-4179-9104-4508d674c3a3" />
 
 - ROS2 가상 로봇과 Kafka 브릿지를 통해 로봇 텔레메트리와 명령을 비동기 처리합니다.
 - Go Worker가 Kafka 메시지를 배치 적재하여 PostgreSQL에 저장합니다.
 - Spring Boot API가 REST, SSE, WebSocket(STOMP)로 대시보드와 로봇 네트워크를 연결합니다.
 - Next.js 대시보드가 Fleet Overview, 개별 로봇 상세, 배터리/위치 이력, 명령 패널을 제공합니다.
-- 개발용 스크립트로 인프라와 애플리케이션을 한 번에 띄울 수 있습니다.
+
+
 
 ## 아키텍처
 
@@ -38,7 +41,7 @@ Dashboard command
 4. `api-spring`이 DB 조회용 REST API를 제공하고, Kafka 이벤트를 받아 SSE/WebSocket으로 클라이언트에 브로드캐스트합니다.
 5. `dashboard-next`가 REST로 초기 상태를 불러오고, SSE와 STOMP로 실시간 상태 및 Ack를 반영합니다.
 
-## 저장소 구조
+## 패키지 구조
 
 ```text
 .
@@ -63,7 +66,7 @@ Dashboard command
 | Dashboard | `services/dashboard-next/` | 실시간 관제 UI, 로봇 상세, 명령 패널 | Next.js 16, React 19, Zustand |
 | Infra | `infra/` | PostgreSQL, Kafka, Zookeeper, fake robot 컨테이너 | Docker Compose |
 
-## 빠른 시작
+## 실행 방법
 
 ### 사전 준비
 
@@ -210,8 +213,3 @@ export ROS_LOCALHOST_ONLY=1
 - [ros/README.md](ros/README.md)
 - [services/api-spring/README.md](services/api-spring/README.md)
 - [services/dashboard-next/README.md](services/dashboard-next/README.md)
-
-## 현재 상태 메모
-
-- 루트 `README.md`는 프로젝트 입구 문서 역할에 집중합니다.
-- 세부 구현과 도메인 규칙은 각 서비스 디렉터리와 `AGENTS.md`, `.agents/skills/` 문서를 참고하면 됩니다.
