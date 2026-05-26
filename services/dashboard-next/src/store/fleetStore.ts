@@ -1,10 +1,17 @@
 import { create } from "zustand";
-import type { RobotState, RobotStatusDto, TelemetryEvent } from "@/types";
+import type {
+  RealtimeConnectionState,
+  RealtimeStatus,
+  RobotState,
+  RobotStatusDto,
+  TelemetryEvent,
+} from "@/types";
 
 const MAX_TRAIL = 200;
 
 interface FleetStore {
   robots: Record<string, RobotState>;
+  realtime: RealtimeStatus;
 
   /** REST /api/robots 초기 로딩 결과 반영 */
   initFromRest: (list: RobotStatusDto[]) => void;
@@ -14,6 +21,11 @@ interface FleetStore {
 
   /** SSE robot_update 이벤트 반영 */
   upsertFromSSE: (event: TelemetryEvent) => void;
+
+  setRealtimeState: (
+    state: RealtimeConnectionState,
+    error?: string | null
+  ) => void;
 }
 
 function emptyRobot(robotId: string): RobotState {
@@ -30,6 +42,12 @@ function emptyRobot(robotId: string): RobotState {
 
 export const useFleetStore = create<FleetStore>((set) => ({
   robots: {},
+  realtime: {
+    state: "connecting",
+    lastEventAt: null,
+    lastEventLabel: null,
+    error: null,
+  },
 
   initFromRest: (list) => {
     const robots: Record<string, RobotState> = {};
@@ -66,8 +84,17 @@ export const useFleetStore = create<FleetStore>((set) => ({
 
       switch (event.type) {
         case "pose": {
-          const x = event.data.x as number;
-          const y = event.data.y as number;
+          const x = Number(event.data.x);
+          const y = Number(event.data.y);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            return {
+              realtime: {
+                ...prev.realtime,
+                state: "error",
+                error: `Invalid pose payload: ${event.robotId}`,
+              },
+            };
+          }
           updated.pose = { x, y, timestamp: event.timestamp };
           updated.online = true;
           const trail = [...existing.trail, { x, y }];
@@ -93,6 +120,23 @@ export const useFleetStore = create<FleetStore>((set) => ({
         }
       }
 
-      return { robots: { ...prev.robots, [event.robotId]: updated } };
+      return {
+        robots: { ...prev.robots, [event.robotId]: updated },
+        realtime: {
+          state: "live",
+          lastEventAt: new Date().toISOString(),
+          lastEventLabel: `${event.robotId} ${event.type}`,
+          error: null,
+        },
+      };
     }),
+
+  setRealtimeState: (state, error = null) =>
+    set((prev) => ({
+      realtime: {
+        ...prev.realtime,
+        state,
+        error,
+      },
+    })),
 }));
