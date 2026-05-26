@@ -9,6 +9,8 @@ interface RobotMapProps {
   robots: RobotState[];
   /** 현재 선택된 로봇 (강조 표시) */
   focusRobotId?: string;
+  /** 이동 궤적까지 포함해 지도 영역을 계산 */
+  includeTrailInView?: boolean;
   className?: string;
 }
 
@@ -22,7 +24,12 @@ const COLORS = [
 ];
 
 /** SVG 기반 2D 로봇 위치 지도 및 궤적 시각화 */
-export function RobotMap({ robots, focusRobotId, className }: RobotMapProps) {
+export function RobotMap({
+  robots,
+  focusRobotId,
+  includeTrailInView = false,
+  className,
+}: RobotMapProps) {
   // viewBox를 현재 위치 기준으로만 계산 (trail 제외)
   // trail까지 포함하면 로봇이 이동할수록 뷰가 계속 확대되어 마커가 점점 작아짐
   const { viewBox, scale } = useMemo(() => {
@@ -39,10 +46,13 @@ export function RobotMap({ robots, focusRobotId, className }: RobotMapProps) {
 
     for (const r of posed) {
       if (!r.pose) continue;
-      if (r.pose.x < minX) minX = r.pose.x;
-      if (r.pose.x > maxX) maxX = r.pose.x;
-      if (r.pose.y < minY) minY = r.pose.y;
-      if (r.pose.y > maxY) maxY = r.pose.y;
+      const points = includeTrailInView ? [...r.trail, r.pose] : [r.pose];
+      for (const point of points) {
+        if (point.x < minX) minX = point.x;
+        if (point.x > maxX) maxX = point.x;
+        if (point.y < minY) minY = point.y;
+        if (point.y > maxY) maxY = point.y;
+      }
     }
 
     // 로봇 분산 범위의 30% or 최소 5 단위를 여백으로 확보
@@ -54,7 +64,7 @@ export function RobotMap({ robots, focusRobotId, className }: RobotMapProps) {
       viewBox: `${minX - pad} ${minY - pad} ${s} ${s}`,
       scale: s,
     };
-  }, [robots]);
+  }, [includeTrailInView, robots]);
 
   const markerSize = scale * 0.02;
 

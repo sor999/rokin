@@ -81,6 +81,7 @@ export default function RobotDetailPage({
           <RobotMap
             robots={Object.values(robots)}
             focusRobotId={robotId}
+            includeTrailInView
             className="h-96"
           />
 

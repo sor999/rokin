@@ -10,29 +10,37 @@ import type { TelemetryEvent } from "@/types";
  */
 export function useFleetSSE() {
   const upsertFromSSE = useFleetStore((s) => s.upsertFromSSE);
+  const setRealtimeState = useFleetStore((s) => s.setRealtimeState);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-    const es = new EventSource(`${base}/api/stream/telemetry`);
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
+    const es = new EventSource(`${apiBase}/api/stream/telemetry`);
     esRef.current = es;
+    setRealtimeState("connecting");
+
+    es.onopen = () => {
+      setRealtimeState("live");
+    };
 
     es.addEventListener("robot_update", (e: MessageEvent) => {
       try {
         const event: TelemetryEvent = JSON.parse(e.data);
         upsertFromSSE(event);
-      } catch {
-        // 파싱 실패 시 무시
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown parse error";
+        console.warn("[SSE] robot_update parse failed", message, e.data);
+        setRealtimeState("error", message);
       }
     });
 
     es.onerror = () => {
-      // 브라우저가 자동 재연결을 처리함
+      setRealtimeState("error", "SSE connection error");
     };
 
     return () => {
       es.close();
       esRef.current = null;
     };
-  }, [upsertFromSSE]);
+  }, [setRealtimeState, upsertFromSSE]);
 }
