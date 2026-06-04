@@ -28,6 +28,15 @@ export interface TelemetryEvent {
   data: Record<string, unknown>;
 }
 
+export type RealtimeConnectionState = "connecting" | "live" | "error";
+
+export interface RealtimeStatus {
+  state: RealtimeConnectionState;
+  lastEventAt: string | null;
+  lastEventLabel: string | null;
+  error: string | null;
+}
+
 // WebSocket Command/Ack
 export interface CommandRequest {
   robotId: string;

@@ -27,8 +27,9 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
     const client = new Client({
-      webSocketFactory: () => new SockJS("/ws"),
+      webSocketFactory: () => new SockJS(`${apiBase}/ws`),
       reconnectDelay: 3000,
       onConnect: () => {
         setIsConnected(true);

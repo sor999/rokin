@@ -9,7 +9,9 @@ import { Separator } from "@/components/ui/separator";
 export function Sidebar() {
   const pathname = usePathname();
   const robots = useFleetStore((s) => s.robots);
+  const realtime = useFleetStore((s) => s.realtime);
   const robotIds = Object.keys(robots).sort();
+  const isLive = realtime.state === "live";
 
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-border bg-sidebar text-sidebar-foreground">
@@ -85,7 +87,24 @@ export function Sidebar() {
       </nav>
 
       {/* 하단 버전 정보 */}
-      <div className="border-t border-border px-4 py-3">
+      <div className="space-y-2 border-t border-border px-4 py-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">Telemetry</span>
+          <span className="flex items-center gap-1.5 font-medium">
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full",
+                isLive ? "bg-emerald-400" : "bg-red-400"
+              )}
+            />
+            {isLive ? "Live" : realtime.state}
+          </span>
+        </div>
+        {realtime.lastEventLabel && (
+          <p className="truncate text-[11px] text-muted-foreground">
+            {realtime.lastEventLabel}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">Robot Telemetry v0.1</p>
       </div>
     </aside>
