@@ -25,7 +25,7 @@ echo "[5/6] Recreating Kafka topics"
 "$ROOT_DIR/infra/kafka/topic-init.sh"
 
 echo "[6/6] Building and starting worker"
-docker build -t "$WORKER_IMAGE" "$ROOT_DIR/services/worker-go" >/dev/null
+docker build -t "$WORKER_IMAGE" "$ROOT_DIR/services/worker" >/dev/null
 docker run -d \
   --name "$WORKER_NAME" \
   --network infra_robot_net \
@@ -51,6 +51,6 @@ Current state:
 - worker started with group id: $WORKER_GROUP_ID
 
 Next steps:
-  ./scripts/test-worker-go.sh
+  ./scripts/test-worker.sh
   docker logs -f $WORKER_NAME
 EOF

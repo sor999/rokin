@@ -7,12 +7,18 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-telemetry}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks:
       - robot_net
-    restart: always
+    restart: unless-stopped
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.3
@@ -21,49 +27,151 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT:-2181}:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "cub zk-ready localhost:2181 30"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
     networks:
       - robot_net
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.4.3
     container_name: robot_kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT:-9092}:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:${KAFKA_PORT:-9092},PLAINTEXT_INTERNAL://kafka:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
       interval: 10s
       timeout: 10s
       retries: 10
       start_period: 30s
     networks:
       - robot_net
+    restart: unless-stopped
+
+  kafka-topic-init:
+    image: confluentinc/cp-kafka:7.4.3
+    container_name: robot_kafka_topic_init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_URL: kafka:29092
+    volumes:
+      - ./kafka/topic-init.sh:/usr/local/bin/topic-init.sh:ro
+    entrypoint: ["/bin/bash", "/usr/local/bin/topic-init.sh"]
+    networks:
+      - robot_net
+
+  api:
+    build:
+      context: ../services/api
+    container_name: robot_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topic-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-telemetry}
+      KAFKA_BROKER_URL: kafka:29092
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - robot_net
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../services/worker
+    container_name: robot_worker
+    depends_on:
+      api:
+        condition: service_healthy
+      kafka-topic-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-telemetry}
+      KAFKA_BROKER_URL: kafka:29092
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-telemetry-worker}
+      KAFKA_TOPICS: ${KAFKA_TOPICS:-telemetry.pose,telemetry.battery,telemetry.status,ack.robot}
+      DLQ_TOPIC: ${DLQ_TOPIC:-dlq.telemetry}
+      BATCH_SIZE: ${BATCH_SIZE:-100}
+      BATCH_FLUSH_MS: ${BATCH_FLUSH_MS:-500}
+    networks:
+      - robot_net
+    restart: unless-stopped
 
   fake_robot:
     build:
       context: ../ros
     container_name: robot_fake_nodes
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-topic-init:
+        condition: service_completed_successfully
+      worker:
+        condition: service_started
     environment:
-      - ROS_DOMAIN_ID=0
-      # ROS_LOCALHOST_ONLY 해제: 브릿지 노드와 동일 컨테이너 내 DDS 통신
-    # fake_robot 3대 + ros_kafka_bridge를 함께 기동하는 통합 launch 파일 사용
+      ROS_DOMAIN_ID: 0
     command: ["ros2", "launch", "ros_kafka_bridge", "full_demo.launch.py"]
     networks:
       - robot_net
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ../services/dashboard
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    container_name: robot_dashboard
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - robot_net
+    restart: unless-stopped
 
 networks:
   robot_net:

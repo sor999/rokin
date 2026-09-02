@@ -37,9 +37,9 @@ Dashboard command
 
 1. `fake_robot`가 `/fleet/{robot_id}` 토픽으로 pose, battery, status, ack를 발행합니다.
 2. `ros_kafka_bridge`가 ROS2 메시지를 Kafka 토픽(`telemetry.pose`, `telemetry.battery`, `telemetry.status`, `ack.robot`)으로 전달합니다.
-3. `worker-go`가 Kafka를 consume해서 PostgreSQL에 배치 적재합니다.
-4. `api-spring`이 DB 조회용 REST API를 제공하고, Kafka 이벤트를 받아 SSE/WebSocket으로 클라이언트에 브로드캐스트합니다.
-5. `dashboard-next`가 REST로 초기 상태를 불러오고, SSE와 STOMP로 실시간 상태 및 Ack를 반영합니다.
+3. `worker`가 Kafka를 consume해서 PostgreSQL에 배치 적재합니다.
+4. `api`가 DB 조회용 REST API를 제공하고, Kafka 이벤트를 받아 SSE/WebSocket으로 클라이언트에 브로드캐스트합니다.
+5. `dashboard`가 REST로 초기 상태를 불러오고, SSE와 STOMP로 실시간 상태 및 Ack를 반영합니다.
 
 ## 패키지 구조
 
@@ -48,9 +48,9 @@ Dashboard command
 ├── infra/                  # Docker Compose, Kafka 토픽 초기화 스크립트
 ├── ros/                    # ROS2 fake_robot, ros_kafka_bridge
 ├── services/
-│   ├── api-spring/         # Spring Boot API, SSE, WebSocket, Swagger
-│   ├── worker-go/          # Kafka Consumer + PostgreSQL batch writer
-│   └── dashboard-next/     # Next.js 대시보드
+│   ├── api/                   # Spring Boot API, SSE, WebSocket, Swagger
+│   ├── worker/                # Kafka Consumer + PostgreSQL batch writer
+│   └── dashboard/             # Next.js 대시보드
 ├── scripts/                # 개발/테스트/빌드 보조 스크립트
 ├── contracts/              # 메시지/도메인 계약 관련 자산
 └── docs/                   # PR 초안 등 문서
@@ -61,9 +61,9 @@ Dashboard command
 | 영역 | 경로 | 역할 | 주요 기술 |
 | --- | --- | --- | --- |
 | ROS2 | `ros/` | 가상 로봇 시뮬레이션, Kafka 브릿지 | ROS2 Humble, Python |
-| API | `services/api-spring/` | REST, SSE, WebSocket, Kafka integration | Spring Boot 3.5, Java 25 |
-| Worker | `services/worker-go/` | Kafka consume, PostgreSQL batch insert, DLQ 처리 | Go 1.22, pgx, confluent-kafka-go |
-| Dashboard | `services/dashboard-next/` | 실시간 관제 UI, 로봇 상세, 명령 패널 | Next.js 16, React 19, Zustand |
+| API | `services/api/` | REST, SSE, WebSocket, Kafka integration | Spring Boot 3.5, Java 25 |
+| Worker | `services/worker/` | Kafka consume, PostgreSQL batch insert, DLQ 처리 | Go 1.22, pgx, confluent-kafka-go |
+| Dashboard | `services/dashboard/` | 실시간 관제 UI, 로봇 상세, 명령 패널 | Next.js 16, React 19, Zustand |
 | Infra | `infra/` | PostgreSQL, Kafka, Zookeeper, fake robot 컨테이너 | Docker Compose |
 
 ## 실행 방법
@@ -71,9 +71,7 @@ Dashboard command
 ### 사전 준비
 
 - Docker / Docker Compose
-- Java 25
-- Go 1.22+
-- Node.js 20+ 및 `pnpm`
+- 각 서비스를 호스트에서 별도로 실행할 경우에만 Java 25, Go 1.22+, Node.js 20+ 및 `pnpm`
 
 ### 1. 환경 변수 준비
 
@@ -83,37 +81,34 @@ cp .env.example .env
 
 기본값만으로도 로컬 실행이 가능합니다.
 
-### 2. 대시보드 의존성 설치
-
-```bash
-cd services/dashboard-next
-pnpm install
-cd ../..
-```
-
-### 3. 전체 개발 환경 실행
+### 2. 전체 개발 환경 실행
 
 ```bash
 ./scripts/dev.sh up
 ```
 
-이 스크립트는 아래 순서로 서비스를 띄웁니다.
+스크립트는 다음 Compose 명령을 실행합니다.
 
-- Docker Compose 인프라 실행
-- Kafka 토픽 초기화
-- Go Worker 실행
-- Spring Boot API 실행
-- Next.js Dashboard 실행
+```bash
+docker compose -f infra/docker-compose.yml up -d --build
+```
 
-### 4. 접속 주소
+PostgreSQL, Kafka/Zookeeper, Kafka 토픽 초기화, Spring API, Go Worker, ROS2 가상
+로봇, Next.js Dashboard가 의존성과 헬스체크 순서에 맞게 실행됩니다.
+
+### 3. 접속 주소
 
 - Dashboard: `http://localhost:3000`
 - Spring API: `http://localhost:8080`
 - Swagger UI: `http://localhost:8080/swagger-ui/index.html`
 - Kafka: `localhost:9092`
-- PostgreSQL: `localhost:5432`
+- PostgreSQL: `localhost:15432`
 
-### 5. 종료
+### 4. 상태 확인과 종료
+
+```bash
+./scripts/dev.sh ps
+```
 
 ```bash
 ./scripts/dev.sh down
@@ -127,24 +122,23 @@ cd ../..
 
 ## 수동 실행
 
-### 인프라 실행
+### 인프라만 실행
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d
-./infra/kafka/topic-init.sh
+docker compose -f infra/docker-compose.yml up -d postgres kafka kafka-topic-init
 ```
 
 ### Go Worker 실행
 
 ```bash
-cd services/worker-go
+cd services/worker
 go run ./cmd/...
 ```
 
 기본 환경 변수:
 
 - `POSTGRES_HOST=localhost`
-- `POSTGRES_PORT=5432`
+- `POSTGRES_PORT=15432` (Compose PostgreSQL 사용 시)
 - `POSTGRES_USER=postgres`
 - `POSTGRES_PASSWORD=postgres`
 - `POSTGRES_DB=telemetry`
@@ -156,14 +150,14 @@ go run ./cmd/...
 ### Spring API 실행
 
 ```bash
-cd services/api-spring
+cd services/api
 ./gradlew bootRun
 ```
 
 ### Next.js Dashboard 실행
 
 ```bash
-cd services/dashboard-next
+cd services/dashboard
 pnpm dev
 ```
 
@@ -202,14 +196,14 @@ export ROS_LOCALHOST_ONLY=1
 
 | 스크립트 | 설명 |
 | --- | --- |
-| `scripts/dev.sh` | 전체 개발 환경 실행/중지/로그 조회 |
-| `scripts/build-worker-go.sh` | Worker Docker 이미지 빌드 |
-| `scripts/test-worker-go.sh` | Worker Go 테스트 실행 |
+| `scripts/dev.sh` | Compose 전체 환경 실행/중지/로그/상태 조회 |
+| `scripts/build-worker.sh` | Worker Docker 이미지 빌드 |
+| `scripts/test-worker.sh` | Worker Go 테스트 실행 |
 | `scripts/reset-test-env.sh` | Kafka/Postgres 및 Worker 테스트 환경 초기화 |
 
 ## 서비스별 문서
 
 - [infra/README.md](infra/README.md)
 - [ros/README.md](ros/README.md)
-- [services/api-spring/README.md](services/api-spring/README.md)
-- [services/dashboard-next/README.md](services/dashboard-next/README.md)
+- [services/api/README.md](services/api/README.md)
+- [services/dashboard/README.md](services/dashboard/README.md)
