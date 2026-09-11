@@ -28,6 +28,6 @@ public class CommandController {
                 request.getData()
         );
         String cmdId = commandService.sendCommand(request);
-        return CommandAcceptedResponseDto.of(cmdId, request.getRobotId());
+        return CommandAcceptedResponseDto.of(cmdId, request.getRobotId(), request.getRequestId());
     }
 }

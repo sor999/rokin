@@ -13,7 +13,7 @@ interface UseCommandWSReturn {
     robotId: string,
     command: string,
     data?: Record<string, unknown>
-  ) => void;
+  ) => string | null;
 }
 
 /**
@@ -27,6 +27,9 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
+    setIsConnected(false);
+    setLastAck(null);
+    setLastResult(null);
     const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
     const client = new Client({
       webSocketFactory: () => new SockJS(`${apiBase}/ws`),
@@ -50,6 +53,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
         });
       },
       onDisconnect: () => setIsConnected(false),
+      onWebSocketClose: () => setIsConnected(false),
       onStompError: () => setIsConnected(false),
     });
 
@@ -65,17 +69,25 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
   const sendCommand = useCallback(
     (rid: string, command: string, data: Record<string, unknown> = {}) => {
       const client = clientRef.current;
-      if (!client?.connected) return;
+      if (!client?.connected) return null;
 
-      client.publish({
-        destination: "/app/command",
-        body: JSON.stringify({
-          robotId: rid,
-          command,
-          data,
-          issuedBy: "dashboard",
-        }),
-      });
+      const requestId = crypto.randomUUID();
+      try {
+        client.publish({
+          destination: "/app/command",
+          body: JSON.stringify({
+            requestId,
+            robotId: rid,
+            command,
+            data,
+            issuedBy: "dashboard",
+          }),
+        });
+        return requestId;
+      } catch {
+        setIsConnected(false);
+        return null;
+      }
     },
     []
   );

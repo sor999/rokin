@@ -11,6 +11,7 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 public class CommandRequestDto {
+    private String requestId;
     private String robotId;
     private String command;
     @JsonTypeInfo(

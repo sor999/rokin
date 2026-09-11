@@ -20,11 +20,17 @@ interface CommandPanelProps {
     robotId: string,
     command: string,
     data?: Record<string, unknown>,
-  ) => void;
+  ) => string | null;
 }
 
 type CmdState = "idle" | "pending" | AckStatus | "timeout";
 
+interface SentCommand {
+  command: "move_to" | "stop";
+  data: Record<string, unknown>;
+}
+
+/** 명령 처리 결과에 맞는 배지 색상을 선택한다. */
 function cmdBadgeVariant(
   state: CmdState,
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -54,27 +60,31 @@ export function CommandPanel({
   const [targetY, setTargetY] = useState("");
   const [cmdState, setCmdState] = useState<CmdState>("idle");
   const [activeCmdId, setActiveCmdId] = useState<string | null>(null);
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+  const [lastCommand, setLastCommand] = useState<SentCommand | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // cmd-result 도착 시 서버가 발급한 cmdId 캡처 (Ack 매칭 키)
   useEffect(() => {
-    if (!lastResult || lastResult.robotId !== robotId) return;
-    if (cmdState === "pending" && !activeCmdId) {
-      setActiveCmdId(lastResult.cmdId);
-    }
-  }, [lastResult, robotId, cmdState, activeCmdId]);
+    if (!lastResult || lastResult.robotId !== robotId || !activeRequestId) return;
+    if (lastResult.requestId !== activeRequestId) return;
+    setActiveCmdId(lastResult.cmdId);
+  }, [lastResult, robotId, activeRequestId]);
 
   // Ack 수신 시 상태 갱신
   useEffect(() => {
     if (!lastAck || lastAck.robotId !== robotId) return;
     if (activeCmdId && lastAck.cmdId === activeCmdId) {
-      setCmdState(lastAck.status);
-      if (timerRef.current) {
+      setCmdState((current) =>
+        current === "done" || current === "failed" ? current : lastAck.status,
+      );
+      if (timerRef.current && (lastCommand?.command !== "stop" ||
+          lastAck.status === "done" || lastAck.status === "failed")) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
     }
-  }, [lastAck, robotId, activeCmdId]);
+  }, [lastAck, robotId, activeCmdId, lastCommand]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -83,36 +93,37 @@ export function CommandPanel({
     }
   }, []);
 
-  const handleMoveTo = useCallback(() => {
-    const x = parseFloat(targetX);
-    const y = parseFloat(targetY);
-    if (isNaN(x) || isNaN(y)) return;
-
+  const send = useCallback((command: SentCommand) => {
     clearTimer();
-    setCmdState("pending");
     setActiveCmdId(null);
-    onSendCommand(robotId, "move_to", { x, y });
-
-    // 3초 timeout
-    timerRef.current = setTimeout(() => {
-      setCmdState("timeout");
-    }, ACK_TIMEOUT_MS);
-  }, [targetX, targetY, robotId, onSendCommand, clearTimer]);
-
-  const handleStop = useCallback(() => {
-    clearTimer();
+    setLastCommand(command);
+    const requestId = onSendCommand(robotId, command.command, command.data);
+    setActiveRequestId(requestId);
+    if (!requestId) {
+      setCmdState("failed");
+      return;
+    }
     setCmdState("pending");
-    setActiveCmdId(null);
-    onSendCommand(robotId, "stop");
 
     timerRef.current = setTimeout(() => {
       setCmdState("timeout");
     }, ACK_TIMEOUT_MS);
   }, [robotId, onSendCommand, clearTimer]);
 
+  const handleMoveTo = useCallback(() => {
+    const x = parseFloat(targetX);
+    const y = parseFloat(targetY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    send({ command: "move_to", data: { x, y } });
+  }, [targetX, targetY, send]);
+
+  const handleStop = useCallback(() => {
+    send({ command: "stop", data: {} });
+  }, [send]);
+
   const handleRetry = useCallback(() => {
-    handleMoveTo();
-  }, [handleMoveTo]);
+    if (lastCommand) send(lastCommand);
+  }, [lastCommand, send]);
 
   // 언마운트 시 타이머 정리
   useEffect(() => clearTimer, [clearTimer]);
@@ -183,7 +194,7 @@ export function CommandPanel({
             size="sm"
             variant="destructive"
             onClick={handleStop}
-            disabled={!isConnected}
+            disabled={!isConnected || (lastCommand?.command === "stop" && cmdState === "pending")}
           >
             Stop
           </Button>
@@ -192,20 +203,30 @@ export function CommandPanel({
         {/* 명령 상태 */}
         {cmdState !== "idle" && (
           <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-            <span className="text-xs text-muted-foreground">Status</span>
-            <Badge variant={cmdBadgeVariant(cmdState)}>{cmdState}</Badge>
+            <span className="text-xs text-muted-foreground">
+              {lastCommand?.command === "stop" ? "Stop" : "Move To"} Status
+            </span>
+            <Badge variant={cmdBadgeVariant(cmdState)}>
+              {lastCommand?.command === "stop" && cmdState === "done" ? "Stopped" : cmdState}
+            </Badge>
           </div>
         )}
 
         {/* Timeout 재시도 */}
-        {cmdState === "timeout" && (
+        {cmdState === "timeout" && lastCommand?.command === "stop" && (
+          <p role="status" className="text-xs text-muted-foreground">
+            Stop confirmation was not received. The robot may still be moving.
+          </p>
+        )}
+        {(cmdState === "timeout" || cmdState === "failed") && (
           <Button
             size="sm"
             variant="outline"
             onClick={handleRetry}
+            disabled={!isConnected}
             className="w-full"
           >
-            Retry
+            {lastCommand?.command === "stop" ? "Retry Stop" : "Retry Move To"}
           </Button>
         )}
       </CardContent>

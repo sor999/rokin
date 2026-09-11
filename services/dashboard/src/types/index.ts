@@ -39,6 +39,7 @@ export interface RealtimeStatus {
 
 // WebSocket Command/Ack
 export interface CommandRequest {
+  requestId?: string;
   robotId: string;
   command: string;
   data: Record<string, unknown>;
@@ -46,6 +47,7 @@ export interface CommandRequest {
 }
 
 export interface CommandResult {
+  requestId?: string | null;
   cmdId: string;
   robotId: string;
   status: string;

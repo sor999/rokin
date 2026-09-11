@@ -159,6 +159,7 @@ export default function RobotDetailPage({
 
           {/* 커맨드 패널 */}
           <CommandPanel
+            key={robotId}
             robotId={robotId}
             isConnected={isConnected}
             lastAck={lastAck}
