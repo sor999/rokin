@@ -41,6 +41,7 @@ target/
 *.nar
 .gradle/
 !gradle/wrapper/gradle-wrapper.jar
+!services/api/gradle/wrapper/gradle-wrapper.jar
 
 # Python (ROS2)
 __pycache__/
@@ -63,12 +64,13 @@ wheels/
 venv/
 env/
 ENV/
-!services/dashboard-next/src/lib/
-!services/dashboard-next/src/lib/**
+!services/dashboard/src/lib/
+!services/dashboard/src/lib/**
 
 # ROS2 specific
 install/
 log/
 
 .claude
+.codex-log/
 plan.md

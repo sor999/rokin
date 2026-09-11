@@ -7,6 +7,7 @@ import uuid
 import datetime
 
 from .logic import FakeRobotLogic
+from .commands import RobotCommands
 
 class FakeRobotNode(Node):
     def __init__(self):
@@ -32,6 +33,7 @@ class FakeRobotNode(Node):
         self.logic = FakeRobotLogic(
             x=start_x, y=start_y, speed=speed, battery=100.0, battery_drain_rate=battery_drain_rate
         )
+        self.commands = RobotCommands(self.logic)
 
         # Publishers
         self.pose_pub = self.create_publisher(Pose2D, f'/fleet/{self.robot_id}/pose', 10)
@@ -47,9 +49,6 @@ class FakeRobotNode(Node):
         # Timer
         self.dt = 1.0 / publish_rate_hz
         self.timer = self.create_timer(self.dt, self.timer_callback)
-
-        # 현재 진행 중인 move_to 명령의 cmd_id (완료 ACK 발행용)
-        self._pending_cmd_id = None
 
         self.get_logger().info(f"FakeRobotNode [{self.robot_id}] started at ({start_x}, {start_y})")
 
@@ -84,37 +83,24 @@ class FakeRobotNode(Node):
 
             self.get_logger().info(f"Received command: {command}")
 
-            if command == 'move_to':
-                target_x = data.get('x', self.logic.x)
-                target_y = data.get('y', self.logic.y)
-                self.logic.set_target(float(target_x), float(target_y))
-                self._pending_cmd_id = cmd_id
-                self._publish_ack(cmd_id, "accepted", f"Moving to ({target_x}, {target_y})")
-            elif command == 'stop':
-                self.logic.stop()
-                self._publish_ack(cmd_id, "done", "Robot stopped")
-            else:
-                self._publish_ack(cmd_id, "failed", f"Unknown command: {command}")
+            for ack in self.commands.handle(cmd_id, command, data):
+                self._publish_ack(ack.cmd_id, ack.status, ack.message)
 
         except json.JSONDecodeError:
             self.get_logger().error("Failed to parse command JSON")
 
     def timer_callback(self):
-        prev_status = self.logic.get_status()
-
         # Update logic
         self.logic.update(self.dt)
 
         # 이동 완료 감지 → done ACK 발행
-        curr_status = self.logic.get_status()
-        if prev_status == 'moving' and curr_status == 'arrived' and self._pending_cmd_id:
+        ack = self.commands.complete_move()
+        if ack is not None:
             x, y = self.logic.get_pose()
             self._publish_ack(
-                self._pending_cmd_id, "done",
-                f"Arrived at ({x:.2f}, {y:.2f})",
+                ack.cmd_id, ack.status, ack.message,
                 {"x": x, "y": y}
             )
-            self._pending_cmd_id = None
 
         # Publish Pose
         x, y = self.logic.get_pose()

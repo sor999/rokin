@@ -1,0 +1,24 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check-issue-number:
+    name: Check issue number
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require issue number at end of title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          title_pattern='\(#[0-9]+\)$'
+          if [[ ! "$PR_TITLE" =~ $title_pattern ]]; then
+            echo "::error::PR 제목은 (#이슈번호)로 끝나야 합니다. 예: feat(api): 이동 명령 API 추가 (#15)"
+            exit 1
+          fi
