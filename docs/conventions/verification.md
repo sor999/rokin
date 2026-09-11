@@ -22,6 +22,7 @@ pnpm build
 ```
 
 ```bash
+PYTHONPATH=ros/src/fake_robot python3 -m unittest discover -s ros/src/fake_robot/test -v
 python3 -m compileall -q ros
 ```
 
