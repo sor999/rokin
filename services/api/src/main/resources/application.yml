@@ -39,6 +39,23 @@ fleet:
   offline-threshold-seconds: 30
   offline-check-ms: 5000
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: api-spring
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
 logging:
   level:
     com.robot.fleet: INFO

@@ -2,13 +2,17 @@ package com.robot.fleet.domain.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.domain.telemetry.dto.TelemetryEvent;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,15 +22,28 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TelemetryStreamService {
 
     private final ObjectMapper objectMapper;
-
     private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+    private final Counter broadcastCounter;
+    private final Counter sendFailureCounter;
+    private final DistributionSummary eventLagSeconds;
 
     // 로봇별 마지막 수신 시각 (Offline 탐지용)
     private final Map<String, OffsetDateTime> lastSeenMap = new ConcurrentHashMap<>();
+
+    public TelemetryStreamService(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        this.objectMapper = objectMapper;
+        this.broadcastCounter = meterRegistry.counter("fleet.sse.broadcast");
+        this.sendFailureCounter = meterRegistry.counter("fleet.sse.send.failures");
+        this.eventLagSeconds = DistributionSummary.builder("fleet.sse.event.lag")
+                .baseUnit("seconds")
+                .publishPercentileHistogram()
+                .register(meterRegistry);
+        Gauge.builder("fleet.sse.connections", emitters, List::size)
+                .register(meterRegistry);
+    }
 
     public Map<String, OffsetDateTime> getLastSeenMap() {
         return lastSeenMap;
@@ -44,6 +61,9 @@ public class TelemetryStreamService {
 
     public void broadcast(TelemetryEvent event) {
         lastSeenMap.put(event.robotId(), event.occurredAt());
+        broadcastCounter.increment();
+        long eventLagMillis = Duration.between(event.occurredAt(), OffsetDateTime.now()).toMillis();
+        eventLagSeconds.record(Math.max(eventLagMillis, 0) / 1000.0);
         String data;
         try {
             data = objectMapper.writeValueAsString(event);
@@ -57,6 +77,7 @@ public class TelemetryStreamService {
             try {
                 emitter.send(SseEmitter.event().name("robot_update").data(data));
             } catch (Exception e) {
+                sendFailureCounter.increment();
                 dead.add(emitter);
             }
         }
@@ -71,6 +92,7 @@ public class TelemetryStreamService {
             try {
                 emitter.send(SseEmitter.event().comment("ping"));
             } catch (Exception e) {
+                sendFailureCounter.increment();
                 dead.add(emitter);
             }
         }

@@ -10,6 +10,10 @@ COMPOSE_FILE="$ROOT_DIR/infra/docker-compose.yml"
 start() {
   docker compose -f "$COMPOSE_FILE" up -d --build
   docker compose -f "$COMPOSE_FILE" ps
+  echo "Prometheus: http://localhost:${PROMETHEUS_PORT:-9090}"
+  echo "Grafana: http://localhost:${GRAFANA_PORT:-3001}"
+  echo "API metrics: http://localhost:${API_PORT:-8080}/actuator/prometheus"
+  echo "Worker metrics: http://localhost:${WORKER_METRICS_PORT:-2112}/metrics"
 }
 
 stop() {

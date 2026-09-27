@@ -12,6 +12,7 @@ import (
 	"github.com/sor999/robot/services/worker/internal/config"
 	"github.com/sor999/robot/services/worker/internal/handler"
 	kafkapkg "github.com/sor999/robot/services/worker/internal/kafka"
+	"github.com/sor999/robot/services/worker/internal/observability"
 	"github.com/sor999/robot/services/worker/internal/repository"
 )
 
@@ -25,6 +26,14 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	metrics := observability.NewMetrics()
+	go func() {
+		log.Printf("[Metrics] Prometheus endpoint 시작 | address=%s", cfg.MetricsAddr)
+		if err := metrics.Serve(ctx, cfg.MetricsAddr); err != nil {
+			log.Printf("[Metrics] 서버 종료 오류: %v", err)
+		}
+	}()
 
 	// DB 연결 풀 초기화
 	pool, err := pgxpool.New(ctx, cfg.DBDSN)
@@ -46,7 +55,13 @@ func main() {
 	log.Println("[Main] DB 마이그레이션 완료")
 
 	// Kafka Consumer 초기화
-	consumer, err := kafkapkg.NewConsumer(cfg.KafkaBroker, cfg.KafkaGroupID, cfg.KafkaTopics, cfg.DLQTopic)
+	consumer, err := kafkapkg.NewConsumer(
+		cfg.KafkaBroker,
+		cfg.KafkaGroupID,
+		cfg.KafkaTopics,
+		cfg.DLQTopic,
+		metrics,
+	)
 	if err != nil {
 		log.Fatalf("Kafka Consumer 초기화 실패: %v", err)
 	}
@@ -59,7 +74,7 @@ func main() {
 	go consumer.Run(ctx, msgCh)
 
 	// 핸들러 (배치 누적 + DB 플러시) 고루틴 기동
-	h := handler.New(repo, consumer, cfg.BatchSize, cfg.BatchFlushMs)
+	h := handler.New(repo, consumer, cfg.BatchSize, cfg.BatchFlushMs, metrics)
 	log.Printf("[Main] Worker 시작 | batchSize=%d | flushMs=%d", cfg.BatchSize, cfg.BatchFlushMs)
 	h.Run(ctx, msgCh)
 

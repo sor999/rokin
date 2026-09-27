@@ -17,7 +17,8 @@ type Config struct {
 	BatchSize    int
 	BatchFlushMs int
 
-	DLQTopic string
+	DLQTopic    string
+	MetricsAddr string
 }
 
 func Load() (*Config, error) {
@@ -55,6 +56,7 @@ func Load() (*Config, error) {
 		BatchSize:    batchSize,
 		BatchFlushMs: batchFlushMs,
 		DLQTopic:     getEnv("DLQ_TOPIC", "dlq.telemetry"),
+		MetricsAddr:  getEnv("METRICS_ADDR", ":2112"),
 	}, nil
 }
 
