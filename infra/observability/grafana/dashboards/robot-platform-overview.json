@@ -178,8 +178,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(kafka_consumergroup_lag{consumergroup=\"telemetry-worker\"})",
-          "legendFormat": "consumer lag",
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag{consumergroup!=\"\"})",
+          "legendFormat": "{{consumergroup}}",
           "range": true,
           "refId": "A"
         }
@@ -730,7 +730,7 @@
               "mode": "none"
             }
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },

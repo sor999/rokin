@@ -32,6 +32,7 @@ func main() {
 		log.Printf("[Metrics] Prometheus endpoint 시작 | address=%s", cfg.MetricsAddr)
 		if err := metrics.Serve(ctx, cfg.MetricsAddr); err != nil {
 			log.Printf("[Metrics] 서버 종료 오류: %v", err)
+			cancel()
 		}
 	}()
 

@@ -72,6 +72,7 @@ ros2 topic echo /fleet/robot_1/pose
 | Kafka exporter | `http://localhost:9308/metrics` | Kafka topic과 consumer lag 노출 |
 
 Grafana 기본 계정은 `admin` / `admin`이며 `.env`의 `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`로 변경할 수 있습니다.
+관측 도구의 호스트 포트는 로컬 개발용으로 `127.0.0.1`에만 바인딩됩니다. 외부 공개가 필요하면 인증과 접근 제어를 먼저 구성하고 Grafana 기본 비밀번호를 변경해야 합니다.
 
 Prometheus의 `Status > Targets`에서 다음 job이 `UP`인지 확인합니다.
 

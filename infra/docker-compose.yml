@@ -132,7 +132,7 @@ services:
       BATCH_FLUSH_MS: ${BATCH_FLUSH_MS:-500}
       METRICS_ADDR: ${METRICS_ADDR:-:2112}
     ports:
-      - "${WORKER_METRICS_PORT:-2112}:2112"
+      - "127.0.0.1:${WORKER_METRICS_PORT:-2112}:2112"
     networks:
       - robot_net
     restart: unless-stopped
@@ -186,7 +186,7 @@ services:
       DATA_SOURCE_USER: ${POSTGRES_USER:-postgres}
       DATA_SOURCE_PASS: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_EXPORTER_PORT:-9187}:9187"
+      - "127.0.0.1:${POSTGRES_EXPORTER_PORT:-9187}:9187"
     networks:
       - robot_net
     restart: unless-stopped
@@ -200,7 +200,7 @@ services:
     command:
       - --kafka.server=kafka:29092
     ports:
-      - "${KAFKA_EXPORTER_PORT:-9308}:9308"
+      - "127.0.0.1:${KAFKA_EXPORTER_PORT:-9308}:9308"
     networks:
       - robot_net
     restart: unless-stopped
@@ -215,10 +215,9 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
-      - --web.enable-lifecycle
       - --web.enable-remote-write-receiver
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -237,7 +236,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
