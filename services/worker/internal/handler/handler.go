@@ -9,6 +9,7 @@ import (
 	"time"
 
 	kafkapkg "github.com/sor999/robot/services/worker/internal/kafka"
+	"github.com/sor999/robot/services/worker/internal/observability"
 	"github.com/sor999/robot/services/worker/internal/repository"
 )
 
@@ -35,6 +36,7 @@ type ackEnvelope struct {
 type Handler struct {
 	repo         *repository.Repository
 	consumer     *kafkapkg.Consumer
+	metrics      *observability.Metrics
 	batchSize    int
 	flushTimeout time.Duration
 	commitMu     sync.Mutex
@@ -62,10 +64,12 @@ func New(
 	consumer *kafkapkg.Consumer,
 	batchSize int,
 	batchFlushMs int,
+	metrics *observability.Metrics,
 ) *Handler {
 	return &Handler{
 		repo:         repo,
 		consumer:     consumer,
+		metrics:      metrics,
 		batchSize:    batchSize,
 		flushTimeout: time.Duration(batchFlushMs) * time.Millisecond,
 		commitState:  make(map[string]*partitionCommitState),
@@ -80,6 +84,9 @@ func New(
 // 토픽별 배치 고루틴을 기동한다.
 func (h *Handler) Run(ctx context.Context, msgCh <-chan kafkapkg.Message) {
 	var wg sync.WaitGroup
+	for _, topic := range []string{"telemetry.pose", "telemetry.battery", "telemetry.status", "ack.robot"} {
+		h.metrics.SetBatchBufferDepth(topic, 0)
+	}
 
 	// 토픽별 배치 고루틴 기동
 	wg.Add(4)
@@ -214,15 +221,19 @@ func (h *Handler) runPoseBatcher(ctx context.Context) {
 
 		var err error
 		for i := 0; i < 3; i++ {
+			startedAt := time.Now()
 			if err = h.repo.BatchInsertPose(flushCtx, buf); err == nil {
+				h.metrics.ObserveBatch("telemetry.pose", len(buf), time.Since(startedAt), true)
 				log.Printf("[Batcher/pose] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
 				}
 				buf = buf[:0]
 				msgs = msgs[:0]
+				h.metrics.SetBatchBufferDepth("telemetry.pose", 0)
 				return
 			}
+			h.metrics.ObserveBatch("telemetry.pose", len(buf), time.Since(startedAt), false)
 			log.Printf("[Batcher/pose] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
 			time.Sleep(time.Duration(1<<i) * time.Second) // exponential backoff: 1s, 2s, 4s
 		}
@@ -247,6 +258,7 @@ func (h *Handler) runPoseBatcher(ctx context.Context) {
 			}
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
+			h.metrics.SetBatchBufferDepth("telemetry.pose", len(buf))
 			if len(buf) >= h.batchSize {
 				flush(false)
 			}
@@ -280,15 +292,19 @@ func (h *Handler) runBatteryBatcher(ctx context.Context) {
 
 		var err error
 		for i := 0; i < 3; i++ {
+			startedAt := time.Now()
 			if err = h.repo.BatchInsertBattery(flushCtx, buf); err == nil {
+				h.metrics.ObserveBatch("telemetry.battery", len(buf), time.Since(startedAt), true)
 				log.Printf("[Batcher/battery] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
 				}
 				buf = buf[:0]
 				msgs = msgs[:0]
+				h.metrics.SetBatchBufferDepth("telemetry.battery", 0)
 				return
 			}
+			h.metrics.ObserveBatch("telemetry.battery", len(buf), time.Since(startedAt), false)
 			log.Printf("[Batcher/battery] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
 			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
@@ -313,6 +329,7 @@ func (h *Handler) runBatteryBatcher(ctx context.Context) {
 			}
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
+			h.metrics.SetBatchBufferDepth("telemetry.battery", len(buf))
 			if len(buf) >= h.batchSize {
 				flush(false)
 			}
@@ -346,15 +363,19 @@ func (h *Handler) runStatusBatcher(ctx context.Context) {
 
 		var err error
 		for i := 0; i < 3; i++ {
+			startedAt := time.Now()
 			if err = h.repo.BatchInsertStatus(flushCtx, buf); err == nil {
+				h.metrics.ObserveBatch("telemetry.status", len(buf), time.Since(startedAt), true)
 				log.Printf("[Batcher/status] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
 				}
 				buf = buf[:0]
 				msgs = msgs[:0]
+				h.metrics.SetBatchBufferDepth("telemetry.status", 0)
 				return
 			}
+			h.metrics.ObserveBatch("telemetry.status", len(buf), time.Since(startedAt), false)
 			log.Printf("[Batcher/status] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
 			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
@@ -379,6 +400,7 @@ func (h *Handler) runStatusBatcher(ctx context.Context) {
 			}
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
+			h.metrics.SetBatchBufferDepth("telemetry.status", len(buf))
 			if len(buf) >= h.batchSize {
 				flush(false)
 			}
@@ -412,15 +434,19 @@ func (h *Handler) runAckBatcher(ctx context.Context) {
 
 		var err error
 		for i := 0; i < 3; i++ {
+			startedAt := time.Now()
 			if err = h.repo.BatchInsertAck(flushCtx, buf); err == nil {
+				h.metrics.ObserveBatch("ack.robot", len(buf), time.Since(startedAt), true)
 				log.Printf("[Batcher/ack] %d건 적재 완료", len(buf))
 				for _, msg := range msgs {
 					h.markProcessed(msg)
 				}
 				buf = buf[:0]
 				msgs = msgs[:0]
+				h.metrics.SetBatchBufferDepth("ack.robot", 0)
 				return
 			}
+			h.metrics.ObserveBatch("ack.robot", len(buf), time.Since(startedAt), false)
 			log.Printf("[Batcher/ack] DB 적재 실패 (재시도 %d/3): %v", i+1, err)
 			time.Sleep(time.Duration(1<<i) * time.Second)
 		}
@@ -445,6 +471,7 @@ func (h *Handler) runAckBatcher(ctx context.Context) {
 			}
 			buf = append(buf, row)
 			msgs = append(msgs, msg)
+			h.metrics.SetBatchBufferDepth("ack.robot", len(buf))
 			if len(buf) >= h.batchSize {
 				flush(false)
 			}

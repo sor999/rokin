@@ -2,23 +2,28 @@ name: PR title
 
 on:
   pull_request:
-    types: [opened, edited, reopened]
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
 
 jobs:
-  check-issue-number:
-    name: Check issue number
+  check-title-format:
+    name: Check title format
     runs-on: ubuntu-latest
     steps:
-      - name: Require issue number at end of title
+      - name: Validate semantic title without issue number
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         shell: bash
         run: |
-          title_pattern='\(#[0-9]+\)$'
+          title_pattern='^(feat|fix|refactor|test|docs|style|chore)\([a-z0-9-]+\): .+$'
+          issue_suffix_pattern=' \(#[0-9]+\)$'
           if [[ ! "$PR_TITLE" =~ $title_pattern ]]; then
-            echo "::error::PR 제목은 (#이슈번호)로 끝나야 합니다. 예: feat(api): 이동 명령 API 추가 (#15)"
+            echo "::error::PR 제목 형식이 올바르지 않습니다. 예: feat(api): 이동 명령 API 추가"
+            exit 1
+          fi
+          if [[ "$PR_TITLE" =~ $issue_suffix_pattern ]]; then
+            echo "::error::PR 제목에 이슈 번호를 넣지 마세요. 관련 이슈는 PR 본문에 작성합니다."
             exit 1
           fi

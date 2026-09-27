@@ -17,4 +17,6 @@ WORKDIR /app
 
 COPY --from=builder /app/worker .
 
+EXPOSE 2112
+
 ENTRYPOINT ["./worker"]

@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/sor999/robot/services/worker/internal/observability"
 )
 
 // Message는 Kafka에서 읽은 메시지와 오프셋 정보를 포함한다.
@@ -22,9 +23,16 @@ type Consumer struct {
 	kc       *kafka.Consumer
 	dlq      *kafka.Producer
 	dlqTopic string
+	metrics  *observability.Metrics
 }
 
-func NewConsumer(broker, groupID string, topics []string, dlqTopic string) (*Consumer, error) {
+func NewConsumer(
+	broker,
+	groupID string,
+	topics []string,
+	dlqTopic string,
+	metrics *observability.Metrics,
+) (*Consumer, error) {
 	kc, err := kafka.NewConsumer(&kafka.ConfigMap{
 		"bootstrap.servers":  broker,
 		"group.id":           groupID,
@@ -45,7 +53,7 @@ func NewConsumer(broker, groupID string, topics []string, dlqTopic string) (*Con
 		return nil, fmt.Errorf("DLQ Producer 생성 실패: %w", err)
 	}
 
-	return &Consumer{kc: kc, dlq: dlq, dlqTopic: dlqTopic}, nil
+	return &Consumer{kc: kc, dlq: dlq, dlqTopic: dlqTopic, metrics: metrics}, nil
 }
 
 // Run은 Kafka 메시지를 읽어 ch 채널로 전달한다. ctx 취소 시 정상 종료한다.
@@ -69,6 +77,7 @@ func (c *Consumer) Run(ctx context.Context, ch chan<- Message) {
 
 		switch msg := ev.(type) {
 		case *kafka.Message:
+			c.metrics.ObserveMessage(*msg.TopicPartition.Topic)
 			ch <- Message{
 				Topic:     *msg.TopicPartition.Topic,
 				Payload:   msg.Value,
@@ -90,12 +99,18 @@ func (c *Consumer) Commit(topic string, partition int32, offset int64) error {
 			Offset:    kafka.Offset(offset + 1), // 다음 읽을 위치
 		},
 	})
+	c.metrics.ObserveOffsetCommit(topic, err == nil)
 	return err
 }
 
 // SendToDLQ는 처리 실패한 메시지를 DLQ 토픽으로 전달한다.
 // DLQ broker가 수신을 확인한 경우에만 nil을 반환한다.
 func (c *Consumer) SendToDLQ(originalTopic string, payload []byte, reason string) error {
+	succeeded := false
+	defer func() {
+		c.metrics.ObserveDLQPublish(originalTopic, succeeded)
+	}()
+
 	envelope := map[string]any{
 		"original_topic": originalTopic,
 		"payload":        string(payload),
@@ -123,6 +138,7 @@ func (c *Consumer) SendToDLQ(originalTopic string, payload []byte, reason string
 		return fmt.Errorf("DLQ delivery 실패: %w", msg.TopicPartition.Error)
 	}
 
+	succeeded = true
 	log.Printf("[DLQ] 발행 완료 | topic=%s", c.dlqTopic)
 	return nil
 }

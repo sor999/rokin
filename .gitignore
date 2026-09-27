@@ -71,6 +71,9 @@ ENV/
 install/
 log/
 
-.claude
+.claude/*
+!.claude/commands/
+!.claude/commands/**
 .codex-log/
 plan.md
+docs/exec-plans/active/improve-scalability-performance.md
