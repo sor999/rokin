@@ -9,22 +9,20 @@ description: 프로젝트의 Git 커밋 컨벤션(한국어), 브랜치 전략, 
 
 ## 1. 브랜치 전략 (Branching Strategy)
 
-Git Flow 전략을 기반으로 합니다. 브랜치 이름에는 기능 식별자와 이슈 번호를 포함합니다.
+`main`을 기준으로 기능 브랜치를 분기하고 PR로 병합합니다. 브랜치 이름에는 이슈 번호를 포함합니다.
 
-- **`main`**: 프로덕션/배포 브랜치 (안정화 상태)
-- **`develop`**: 다음 배포를 위해 기능들이 통합되는 개발 브랜치
-- **`feature/`**: 새로운 기능 개발 (`develop`에서 분기, `develop`으로 병합)
-  - 포맷: `feature/#<issue-number>-<short-description>`
-  - 예시: `feature/#12-add-robot-pose-topic`
-- **`release/`**: 배포 준비 브랜치 (`develop`에서 분기, `main`과 `develop`으로 병합)
-- **`hotfix/`**: 배포된 프로덕션 버전의 긴급 이슈 수정 (`main`에서 분기, `main`과 `develop`으로 병합)
-  - 포맷: `hotfix/#<issue-number>-<short-description>`
-  - 예시: `hotfix/#34-websocket-crash`
+- **`main`**: 기본 및 배포 브랜치
+- **`feature/`**: 새로운 기능 개발 (`main`에서 분기, `main`으로 병합)
+  - 포맷: `feature/<issue-number>-<verb>-<feature>`
+  - 예시: `feature/12-add-robot-pose-topic`
+- **`hotfix/`**: 배포된 기능의 긴급 수정 (`main`에서 분기, `main`으로 병합)
+  - 포맷: `hotfix/<issue-number>-<verb>-<feature>`
+  - 예시: `hotfix/34-fix-websocket-crash`
 
 ## 2. 커밋 메시지 컨벤션 (Commit Conventions)
 
-커밋 메시지는 **반드시 한국어**로 작성합니다. 로컬 커밋에는 이슈 번호를 강제하지
-않으며, 이슈 번호는 Squash and Merge 시 최종 커밋이 되는 PR 제목에서 관리합니다.
+커밋 메시지는 **반드시 한국어**로 작성합니다. 로컬 커밋과 PR 제목에는 이슈 번호를
+넣지 않으며, 관련 이슈는 PR 본문에서 관리합니다.
 
 ### 커밋 메시지 구조
 ```
