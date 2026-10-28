@@ -8,6 +8,7 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, String
 
 from .consumer import KafkaCommandConsumer
+from .commands import FleetCommandRouter
 from .producer import KafkaTelemetryProducer
 
 
@@ -24,11 +25,17 @@ class RosKafkaBridgeNode(Node):
         # 파라미터 선언
         self.declare_parameter('kafka_broker', 'kafka:29092')
         self.declare_parameter('kafka_group_id', 'ros_kafka_bridge')
+        self.declare_parameter('fleet_id', 'default')
+        self.declare_parameter('command_dlq_topic', 'dlq.command')
         self.declare_parameter('robot_ids', ['robot_1', 'robot_2', 'robot_3'])
 
         broker: str = self.get_parameter('kafka_broker').value
         group_id: str = self.get_parameter('kafka_group_id').value
         self._robot_ids: list[str] = self.get_parameter('robot_ids').value
+
+        self._router = FleetCommandRouter(
+            self.get_parameter('fleet_id').value, self._robot_ids, self._on_kafka_command
+        )
 
         # Kafka Producer (ROS → Kafka)
         self._producer = KafkaTelemetryProducer(broker)
@@ -70,9 +77,10 @@ class RosKafkaBridgeNode(Node):
         # Kafka Consumer (cmd.robot → ROS)
         self._consumer = KafkaCommandConsumer(
             broker=broker,
-            group_id=group_id,
+            group_id=self._router.consumer_group(group_id),
             topic='cmd.robot',
-            on_message=self._on_kafka_command,
+            on_message=self._router.dispatch,
+            dlq_topic=self.get_parameter('command_dlq_topic').value,
         )
         self._consumer.start()
 
@@ -124,13 +132,7 @@ class RosKafkaBridgeNode(Node):
 
     def _on_kafka_command(self, cmd: dict) -> None:
         """Kafka cmd.robot에서 수신한 Command를 해당 로봇의 ROS 토픽으로 Relay한다."""
-        robot_id = cmd.get('robot_id')
-        if not robot_id:
-            self.get_logger().warning("[Bridge] robot_id 없는 command 수신, 무시합니다.")
-            return
-        if robot_id not in self._cmd_publishers:
-            self.get_logger().warning(f"[Bridge] 알 수 없는 robot_id: {robot_id}, 무시합니다.")
-            return
+        robot_id = cmd['robot_id']
 
         msg = String()
         msg.data = json.dumps(cmd)

@@ -1,79 +1,139 @@
+import base64
 import json
 import logging
 import threading
 from typing import Callable
 
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka import Consumer, KafkaError, Producer
+
+from .commands import CommandRejected
 
 logger = logging.getLogger(__name__)
 
 
 class KafkaCommandConsumer:
-    """Kafka cmd.robot 토픽을 Consume해 콜백으로 명령을 전달하는 클래스.
-
-    별도 데몬 스레드에서 실행되며, ROS 노드 생명주기와 함께 start/stop된다.
-    """
-
-    def __init__(self, broker: str, group_id: str, topic: str, on_message: Callable[[dict], None]):
-        """
-        Args:
-            broker: Kafka 브로커 주소 (예: kafka:29092)
-            group_id: Kafka Consumer 그룹 ID
-            topic: 구독할 Kafka 토픽 (예: cmd.robot)
-            on_message: 메시지 수신 시 호출할 콜백. dict(파싱된 JSON)을 인자로 받는다.
-        """
+    def __init__(self, broker: str, group_id: str, topic: str,
+                 on_message: Callable[[dict], None], dlq_topic: str = 'dlq.command',
+                 consumer_factory=Consumer, producer_factory=Producer, retry_seconds=1.0):
         self._config = {
             'bootstrap.servers': broker,
             'group.id': group_id,
             'auto.offset.reset': 'latest',
-            'enable.auto.commit': False,  # 수동 커밋 사용 (At-least-once 보장)
+            'enable.auto.commit': False,
+            'enable.auto.offset.store': False,
         }
+        self._producer_config = {'bootstrap.servers': broker, 'enable.idempotence': True}
         self._topic = topic
+        self._dlq_topic = dlq_topic
         self._on_message = on_message
-        self._running = False
-        self._thread: threading.Thread | None = None
+        self._consumer_factory = consumer_factory
+        self._producer_factory = producer_factory
+        self._retry_seconds = retry_seconds
+        self._stop = threading.Event()
+        self.ready = threading.Event()
+        self._thread = None
 
     def start(self) -> None:
-        """백그라운드 데몬 스레드에서 Kafka poll 루프를 시작한다."""
-        self._running = True
+        self._stop.clear()
+        self.ready.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True, name='kafka-consumer')
         self._thread.start()
-        logger.info(f"[Consumer] 구독 시작: topic={self._topic}")
 
     def stop(self) -> None:
-        """poll 루프를 종료하고 Consumer를 닫는다."""
-        self._running = False
+        self._stop.set()
+        self.ready.clear()
         if self._thread:
-            self._thread.join(timeout=5.0)
-        logger.info("[Consumer] 종료 완료")
+            self._thread.join(timeout=15.0)
+            if self._thread.is_alive():
+                raise RuntimeError('Command consumer did not stop')
+
+    def _send_dlq(self, producer, message, reason):
+        payload = {
+            'source_topic': message.topic(),
+            'source_partition': message.partition(),
+            'source_offset': message.offset(),
+            'original_payload_base64': base64.b64encode(message.value() or b'').decode('ascii'),
+            'error': str(reason),
+        }
+        result = []
+        producer.produce(
+            self._dlq_topic, key=message.key(), value=json.dumps(payload).encode('utf-8'),
+            on_delivery=lambda error, delivered: result.append(error),
+        )
+        remaining = producer.flush(timeout=10.0)
+        if remaining or not result or result[0] is not None:
+            raise RuntimeError('Command DLQ delivery was not acknowledged')
+
+    def _process(self, consumer, producer, message):
+        try:
+            value = json.loads(message.value())
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as error:
+            self._send_dlq(producer, message, error)
+        else:
+            try:
+                self._on_message(value)
+            except CommandRejected as error:
+                self._send_dlq(producer, message, error)
+        self._check_commit(consumer.commit(message=message, asynchronous=False))
+
+    @staticmethod
+    def _check_commit(partitions):
+        if partitions and any(partition.error for partition in partitions):
+            raise RuntimeError('Command offset commit failed')
+
+    def _on_assign(self, consumer, partitions):
+        self.ready.clear()
+        committed = consumer.committed(partitions, timeout=10.0)
+        self._check_commit(committed)
+        initial = []
+        for partition in committed:
+            if partition.offset < 0:
+                low, high = consumer.get_watermark_offsets(partition, timeout=10.0)
+                partition.offset = high
+                initial.append(partition)
+        consumer.assign(committed)
+        if initial:
+            self._check_commit(consumer.commit(offsets=initial, asynchronous=False))
+        self.ready.set()
+        logger.info('Command consumer assignment ready: %s', self._config['group.id'])
+
+    def _on_revoke(self, consumer, partitions):
+        self.ready.clear()
+
+    def _consume(self, consumer, producer):
+        while not self._stop.is_set():
+            message = consumer.poll(timeout=1.0)
+            if message is None:
+                continue
+            if message.error():
+                if message.error().code() != KafkaError._PARTITION_EOF:
+                    logger.error('Kafka command error: %s', message.error())
+                continue
+            for attempt in range(3):
+                if self._stop.is_set():
+                    return
+                try:
+                    self._process(consumer, producer, message)
+                    break
+                except Exception:
+                    logger.exception('Command processing failed; offset retained')
+                    if attempt == 2:
+                        raise
+                    self._stop.wait(self._retry_seconds)
 
     def _poll_loop(self) -> None:
-        consumer = Consumer(self._config)
-        consumer.subscribe([self._topic])
-        try:
-            while self._running:
-                msg = consumer.poll(timeout=1.0)
-                if msg is None:
-                    continue
-                if msg.error():
-                    # EOF는 정상 파티션 끝, 그 외는 실제 오류
-                    if msg.error().code() != KafkaError._PARTITION_EOF:
-                        logger.error(f"[Consumer] Kafka 오류: {msg.error()}")
-                    continue
-
-                try:
-                    value = json.loads(msg.value().decode('utf-8'))
-                    self._on_message(value)
-                    # 성공적으로 처리된 경우에만 오프셋 커밋
-                    consumer.commit(asynchronous=False)
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    logger.warning(f"[Consumer] 메시지 파싱 실패: {e}")
-                    # 파싱 실패한 메시지는 다시 시도해도 실패할 것이므로 커밋하여 넘김 (필요 시 DLQ 처리)
-                    consumer.commit(asynchronous=False)
-                except Exception:
-                    logger.exception("[Consumer] 콜백 처리 중 예외 발생")
-                    # 처리 실패 시 커밋하지 않음 -> 재시작 시 해당 메시지부터 다시 읽음
-        except KafkaException:
-            logger.exception("[Consumer] 치명적 Kafka 오류 발생")
-        finally:
-            consumer.close()
+        while not self._stop.is_set():
+            consumer = None
+            try:
+                consumer = self._consumer_factory(self._config)
+                producer = self._producer_factory(self._producer_config)
+                consumer.subscribe([self._topic], on_assign=self._on_assign,
+                                   on_revoke=self._on_revoke, on_lost=self._on_revoke)
+                self._consume(consumer, producer)
+            except Exception:
+                logger.exception('Reconnecting command consumer from committed offsets')
+            finally:
+                self.ready.clear()
+                if consumer is not None:
+                    consumer.close()
+            self._stop.wait(self._retry_seconds)

@@ -18,7 +18,7 @@ def generate_launch_description():
             package='ros_kafka_bridge',
             executable='ros_kafka_bridge_node',
             name='ros_kafka_bridge_node',
-            parameters=[config],
+            parameters=[config, {'fleet_id': os.environ['FLEET_ID']} if 'FLEET_ID' in os.environ else {}],
             output='screen',
         )
     ])

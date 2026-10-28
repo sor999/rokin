@@ -10,6 +10,7 @@ TOPICS=(
   "cmd.robot"
   "ack.robot"
   "dlq.telemetry"
+  "dlq.command"
 )
 
 BROKER="${KAFKA_BROKER_URL:-localhost:9092}"

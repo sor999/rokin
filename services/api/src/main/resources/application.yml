@@ -36,6 +36,7 @@ spring:
         partitioner.class: org.apache.kafka.clients.producer.internals.DefaultPartitioner
 
 fleet:
+  id: ${FLEET_ID:default}
   offline-threshold-seconds: 30
   offline-check-ms: 5000
 

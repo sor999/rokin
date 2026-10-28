@@ -97,6 +97,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-telemetry}
       KAFKA_BROKER_URL: kafka:29092
+      FLEET_ID: ${FLEET_ID:-default}
     ports:
       - "${API_PORT:-8080}:8080"
     healthcheck:
@@ -148,6 +149,7 @@ services:
         condition: service_started
     environment:
       ROS_DOMAIN_ID: 0
+      FLEET_ID: ${FLEET_ID:-default}
     command: ["ros2", "launch", "ros_kafka_bridge", "full_demo.launch.py"]
     networks:
       - robot_net

@@ -23,12 +23,14 @@ pnpm build
 
 ```bash
 PYTHONPATH=ros/src/fake_robot python3 -m unittest discover -s ros/src/fake_robot/test -v
+PYTHONPATH=ros/src/ros_kafka_bridge python3 -m unittest discover -s ros/src/ros_kafka_bridge/test -v
 python3 -m compileall -q ros
 ```
 
 - API 테스트는 H2 설정과 Java 25를 사용합니다.
 - Worker 로컬 검증에는 `librdkafka`가 필요합니다.
 - Dashboard 검증에는 설치된 `node_modules`가 필요합니다.
+- Bridge 소비/DLQ 테스트는 `confluent-kafka==2.6.1`이 필요하며 ROS 런타임은 요구하지 않습니다.
 - `infra/`, `contracts/`, `.env.example`처럼 공통 경계를 바꾸면 영향을 받는 모든 서비스 명령을 실행합니다.
 
 ## 기본 게이트 밖의 검증
@@ -63,3 +65,17 @@ python3 -m compileall -q ros
 - Worker: `services/worker`에서 `TEST_DATABASE_URL=postgres://postgres:rokin_test_only@localhost:25417/rokin_issue17?sslmode=disable go test ./internal/repository -v`
 - 위 연결값은 격리 테스트용 예시입니다. API는 `MIGRATION_TEST_USER`, `MIGRATION_TEST_PASSWORD`로 계정을 바꿀 수 있습니다. 기본값은 `postgres`, `rokin_test_only`입니다.
 - 환경 변수가 없으면 PostgreSQL 전용 테스트는 건너뜁니다. 일반 H2 테스트 통과만으로 마이그레이션과 PostgreSQL 동시성을 검증했다고 보고하지 않습니다.
+
+## Bridge Kafka 경계 검증
+
+운영·개발 브로커와 분리된 테스트 Kafka를 사용합니다. 테스트는 고유 이름의 임시 토픽과
+consumer group을 만들며 ROS 런타임 대신 순수 로봇 동작 콜백으로 연결합니다.
+
+```bash
+KAFKA_TEST_BROKER=127.0.0.1:19018 \
+PYTHONPATH=ros/src/ros_kafka_bridge:ros/src/fake_robot \
+python3 -m unittest discover -s ros/src/ros_kafka_bridge/test -p test_kafka_integration.py -v
+```
+
+기본 단위 테스트에서는 해당 환경 변수가 없으면 Kafka 통합 테스트를 건너뜁니다.
+실제 ROS2 토픽·DDS·물리 로봇 수신은 이 검증에 포함되지 않습니다.

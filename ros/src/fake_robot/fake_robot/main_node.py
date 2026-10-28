@@ -20,6 +20,8 @@ class FakeRobotNode(Node):
         self.declare_parameter('start_x', 0.0)
         self.declare_parameter('start_y', 0.0)
         self.declare_parameter('battery_drain_rate', 0.1)
+        self.declare_parameter('command_dedup_ttl_seconds', 300.0)
+        self.declare_parameter('command_dedup_max_entries', 10000)
 
         # Get parameters
         self.robot_id = self.get_parameter('robot_id').value
@@ -33,7 +35,11 @@ class FakeRobotNode(Node):
         self.logic = FakeRobotLogic(
             x=start_x, y=start_y, speed=speed, battery=100.0, battery_drain_rate=battery_drain_rate
         )
-        self.commands = RobotCommands(self.logic)
+        self.commands = RobotCommands(
+            self.logic,
+            ttl_seconds=self.get_parameter('command_dedup_ttl_seconds').value,
+            max_entries=self.get_parameter('command_dedup_max_entries').value,
+        )
 
         # Publishers
         self.pose_pub = self.create_publisher(Pose2D, f'/fleet/{self.robot_id}/pose', 10)
@@ -77,7 +83,7 @@ class FakeRobotNode(Node):
     def cmd_callback(self, msg):
         try:
             cmd_payload = json.loads(msg.data)
-            cmd_id = cmd_payload.get('cmd_id', str(uuid.uuid4()))
+            cmd_id = cmd_payload.get('cmd_id')
             command = cmd_payload.get('command')
             data = cmd_payload.get('data', {})
 
@@ -86,8 +92,8 @@ class FakeRobotNode(Node):
             for ack in self.commands.handle(cmd_id, command, data):
                 self._publish_ack(ack.cmd_id, ack.status, ack.message)
 
-        except json.JSONDecodeError:
-            self.get_logger().error("Failed to parse command JSON")
+        except (ValueError, TypeError, AttributeError, OverflowError) as error:
+            self.get_logger().error(f"Invalid command: {error}")
 
     def timer_callback(self):
         # Update logic
