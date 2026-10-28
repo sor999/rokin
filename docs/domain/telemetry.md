@@ -16,7 +16,7 @@
 | Battery | `event_id` | DB unique/`ON CONFLICT DO NOTHING` | `telemetry.battery` |
 | Status | `event_id` | DB unique/`ON CONFLICT DO NOTHING` | `telemetry.status` |
 | Command | `cmd_id` | 로봇 동작을 같은 명령에 한 번만 적용 | `cmd.robot` |
-| Ack | `cmd_id` + 상태 전이 | 같은 전이를 중복 표시/적재하지 않음 | `ack.robot` |
+| Ack | `cmd_id` + 상태 전이 | 영속 이력은 최초 상태와 accepted → done/failed만 적재 | `ack.robot` |
 | 처리 실패 | 원본 메시지 식별자 | 원본과 실패 원인을 보존 | `dlq.telemetry` |
 
 모든 이벤트 시간은 타임존을 포함한 ISO-8601 문자열 또는 PostgreSQL `TIMESTAMPTZ`로 취급합니다.
@@ -47,3 +47,10 @@
 - 잘못된 payload가 프로세스를 중단시키지 않고 관측 가능한 실패로 남는가?
 - 새 Kafka 토픽이 로컬 초기화와 배포 환경 모두에 생성되는가?
 - 스키마 변경이 새 Flyway 버전으로 추가되고 Worker SQL과 호환되는가?
+
+## Ack 영속성
+
+Flyway V3의 `robot_ack_state`가 명령별 전이를 관리한다. timestamp가 달라도 같은 상태는
+재적재하지 않으며, done/failed 이후 accepted나 다른 종료 상태는 무시한다. 기존 로그는
+삭제하지 않고 보존한다. API 실시간 브로드캐스트 중복 방지는 별도 범위다.
+상세 결정과 배포 순서는 [ADR 0002](../decisions/0002-ack-persistence.md)를 따른다.

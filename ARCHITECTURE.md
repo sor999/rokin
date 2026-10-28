@@ -25,9 +25,9 @@ HTTP, SSE, WebSocket/STOMP, PostgreSQL 스키마 같은 명시적 계약으로�
 | 브라우저 상태와 표시 | Next.js Dashboard | `services/dashboard/src/` |
 | 로컬 인프라와 토픽 생성 | Infra | `infra/` |
 
-Worker의 `internal/repository/migrate.go`에는 단독 개발 실행을 위한 호환 DDL이 남아 있습니다.
-새 스키마는 반드시 Flyway에 먼저 정의하고, 호환 DDL을 유지하는 동안 두 정의의 차이를
-검토해야 합니다. 이 예외와 종료 조건은 [ADR 0001](docs/decisions/0001-service-boundaries.md)에 기록합니다.
+Worker는 시작 시 필요한 스키마를 읽기 전용으로 확인하며 DDL을 실행하지 않습니다.
+API/Flyway 마이그레이션을 먼저 적용해야 합니다. Compose는 API가 준비된 뒤 Worker를
+시작합니다. Ack 상태 전이와 기존 이력 보존은 [ADR 0002](docs/decisions/0002-ack-persistence.md)를 따릅니다.
 
 ## 데이터 흐름의 불변식
 
@@ -44,7 +44,7 @@ Worker의 `internal/repository/migrate.go`에는 단독 개발 실행을 위한 
 | 변경 | 함께 확인할 영역 |
 | --- | --- |
 | Kafka 토픽/Envelope | ROS bridge, Worker handler, Spring listener/DTO, `infra/kafka/topic-init.sh` |
-| DB 컬럼/인덱스 | Flyway, JPA Entity/Repository, Worker SQL/호환 DDL |
+| DB 컬럼/인덱스 | Flyway, JPA Entity/Repository, Worker SQL |
 | REST 응답 | Spring DTO/Controller 테스트, Dashboard `src/types`와 API client |
 | Command/Ack 상태 | Dashboard command UI/store, Spring service/listener, ROS command handler |
 | 실시간 이벤트 타입 | Spring stream service/DTO, Dashboard hooks/store |

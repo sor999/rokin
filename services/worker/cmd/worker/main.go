@@ -48,12 +48,11 @@ func main() {
 	}
 	log.Println("[Main] DB 연결 성공")
 
-	// 테이블 자동 생성 (개발 환경용)
 	repo := repository.New(pool)
-	if err := repository.Migrate(ctx, pool); err != nil {
-		log.Fatalf("DB 마이그레이션 실패: %v", err)
+	if err := repository.CheckSchema(ctx, pool); err != nil {
+		log.Fatalf("DB 스키마 확인 실패: %v", err)
 	}
-	log.Println("[Main] DB 마이그레이션 완료")
+	log.Println("[Main] Flyway 스키마 확인 완료")
 
 	// Kafka Consumer 초기화
 	consumer, err := kafkapkg.NewConsumer(
