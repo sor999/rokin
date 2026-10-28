@@ -58,3 +58,30 @@ class FleetRouterTest(unittest.TestCase):
         first = FleetCommandRouter('site-a', ['robot_1', 'robot_2'], self.sent.append)
         reordered = FleetCommandRouter('site-a', ['robot_2', 'robot_1'], self.sent.append)
         self.assertEqual(first.consumer_group('bridge'), reordered.consumer_group('bridge'))
+
+    def test_other_bridge_owned_commands_are_skipped_without_dlq_rejection(self):
+        router = FleetCommandRouter('site-a', ['robot_2'], self.sent.append,
+                                    fleet_robot_ids=['robot_1', 'robot_2'])
+        router.dispatch(self.command)
+        self.assertEqual([], self.sent)
+        with self.assertRaises(CommandRejected):
+            router.dispatch(dict(self.command, robot_id='robot_3'))
+
+    def test_ownership_changes_use_fresh_generations_even_when_roster_reverts(self):
+        groups = []
+        for robots, generation in ((['robot_1'], '1'), (['robot_1', 'robot_2'], '2'), (['robot_1'], '3')):
+            router = FleetCommandRouter('site-a', robots, self.sent.append,
+                                        fleet_robot_ids=['robot_1', 'robot_2'],
+                                        ownership_generation=generation)
+            groups.append(router.consumer_group('bridge'))
+        self.assertEqual(3, len(set(groups)))
+
+    def test_noncanonical_uuid_spellings_are_rejected(self):
+        canonical = 'abcdef01-2345-6789-abcd-ef0123456789'
+        for spelling in (canonical.upper(), canonical.replace('-', ''), '{' + canonical + '}', 'urn:uuid:' + canonical):
+            with self.subTest(spelling=spelling), self.assertRaises(CommandRejected):
+                self.router.dispatch(dict(self.command, cmd_id=spelling))
+
+    def test_local_ownership_must_be_in_fleet_manifest(self):
+        with self.assertRaises(ValueError):
+            FleetCommandRouter('site-a', ['robot_2'], self.sent.append, fleet_robot_ids=['robot_1'])

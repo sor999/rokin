@@ -34,27 +34,28 @@ class KafkaRoutingTest(unittest.TestCase):
         observed_all = threading.Event()
         attempts = []
         try:
-            for fleet, robot in (('site-a', 'robot_1'), ('site-b', 'robot_2')):
+            for fleet, robot in (('site-a', 'robot_1'), ('site-a', 'robot_2'), ('site-b', 'robot_3')):
                 commands = RobotCommands(FakeRobotLogic(battery_drain_rate=0))
-                states[fleet] = commands
+                states[(fleet, robot)] = commands
 
-                def publish(command, commands=commands, fleet=fleet):
+                def publish(command, commands=commands, fleet=fleet, robot=robot):
                     with lock:
-                        attempts.append((fleet, command['cmd_id']))
-                        if fleet == 'site-a' and sum(item[0] == fleet for item in attempts) <= 3:
+                        attempts.append((fleet, robot, command['cmd_id']))
+                        if (fleet, robot) == ('site-a', 'robot_1') and sum(item[:2] == (fleet, robot) for item in attempts) <= 3:
                             raise RuntimeError('injected temporary relay failure')
                         commands.handle(command['cmd_id'], command['command'], command['data'])
-                        deliveries.append((fleet, command['command']))
-                        if len(deliveries) == 5:
+                        deliveries.append((fleet, robot, command['command']))
+                        if len(deliveries) == 6:
                             done.set()
 
-                router = FleetCommandRouter(fleet, [robot], publish)
+                router = FleetCommandRouter(fleet, [robot], publish,
+                                            fleet_robot_ids=['robot_1', 'robot_2'] if fleet == 'site-a' else ['robot_3'])
 
                 def dispatch(command, router=router, fleet=fleet):
                     router.dispatch(command)
                     with lock:
                         observed.append((fleet, command['cmd_id']))
-                        if len(observed) == 10:
+                        if len(observed) == 18:
                             observed_all.set()
 
                 consumer = KafkaCommandConsumer(broker, router.consumer_group('test-' + suffix),
@@ -68,17 +69,19 @@ class KafkaRoutingTest(unittest.TestCase):
             move = {'fleet_id': 'site-a', 'robot_id': 'robot_1', 'cmd_id': move_id,
                     'command': 'move_to', 'data': {'x': 100, 'y': 0}}
             stop = dict(move, cmd_id=stop_id, command='stop', data={})
-            other = dict(stop, fleet_id='site-b', robot_id='robot_2', cmd_id=str(uuid.uuid4()))
-            messages = [move, move, stop, move, other]
+            other_local = dict(stop, robot_id='robot_2', cmd_id=str(uuid.uuid4()))
+            other = dict(stop, fleet_id='site-b', robot_id='robot_3', cmd_id=str(uuid.uuid4()))
+            messages = [move, move, stop, move, other_local, other]
             for command in messages:
                 producer.produce(topic, key=command['robot_id'], value=json.dumps(command).encode())
             self.assertEqual(0, producer.flush(10))
             self.assertTrue(done.wait(15), 'command callbacks timed out')
             self.assertTrue(observed_all.wait(15), 'each fleet group must see every valid envelope')
-            self.assertEqual(4, sum(fleet == 'site-a' for fleet, action in deliveries))
-            self.assertEqual(1, sum(fleet == 'site-b' for fleet, action in deliveries))
-            self.assertEqual('idle', states['site-a'].logic.get_status())
-            self.assertIsNone(states['site-a'].pending_move_id)
+            self.assertEqual(4, sum((fleet, robot) == ('site-a', 'robot_1') for fleet, robot, action in deliveries))
+            self.assertEqual(1, sum((fleet, robot) == ('site-a', 'robot_2') for fleet, robot, action in deliveries))
+            self.assertEqual(1, sum(fleet == 'site-b' for fleet, robot, action in deliveries))
+            self.assertEqual('idle', states[('site-a', 'robot_1')].logic.get_status())
+            self.assertIsNone(states[('site-a', 'robot_1')].pending_move_id)
             invalid = dict(stop, robot_id='not-owned', cmd_id=str(uuid.uuid4()))
             raw = json.dumps(invalid).encode()
             producer.produce(topic, key='not-owned', value=raw)

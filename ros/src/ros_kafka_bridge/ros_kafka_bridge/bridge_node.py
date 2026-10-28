@@ -29,13 +29,17 @@ class RosKafkaBridgeNode(Node):
         self.declare_parameter('fleet_id', 'default')
         self.declare_parameter('command_dlq_topic', 'dlq.command')
         self.declare_parameter('robot_ids', ['robot_1', 'robot_2', 'robot_3'])
+        self.declare_parameter('fleet_robot_ids', ['robot_1', 'robot_2', 'robot_3'])
+        self.declare_parameter('ownership_generation', '1')
 
         broker: str = self.get_parameter('kafka_broker').value
         group_id: str = self.get_parameter('kafka_group_id').value
         self._robot_ids: list[str] = self.get_parameter('robot_ids').value
 
         self._router = FleetCommandRouter(
-            self.get_parameter('fleet_id').value, self._robot_ids, self._on_kafka_command
+            self.get_parameter('fleet_id').value, self._robot_ids, self._on_kafka_command,
+            fleet_robot_ids=self.get_parameter('fleet_robot_ids').value,
+            ownership_generation=self.get_parameter('ownership_generation').value,
         )
 
         # Kafka Producer (ROS → Kafka)
@@ -145,9 +149,13 @@ class RosKafkaBridgeNode(Node):
     # 생명주기
 
     def destroy_node(self) -> None:
-        self._consumer.stop()
-        self._producer.flush()
-        super().destroy_node()
+        try:
+            self._consumer.stop()
+        finally:
+            try:
+                self._producer.flush()
+            finally:
+                super().destroy_node()
 
 
 def main(args=None):
@@ -159,9 +167,11 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        try:
+            node.destroy_node()
+        finally:
+            if rclpy.ok():
+                rclpy.shutdown()
 
 
 if __name__ == '__main__':

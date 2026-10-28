@@ -14,17 +14,25 @@ ROS 로봇 담당 범위는 일치하지 않으므로 잘못 받은 명령을 �
 
 API 인스턴스는 서버 설정 `fleet.id`(`FLEET_ID`, 기본 `default`)를 명령의 `fleet_id`에 포함한다.
 브라우저가 Fleet 소유권을 지정하지 않는다. 명령 토픽은 `cmd.robot`, 키는 기존 robot_id를 유지한다.
-Bridge는 ROS 파라미터 `fleet_id`, `robot_ids`로 소유권을 선언한다. Compose는 API와 Bridge에
+Bridge는 ROS 파라미터 `fleet_id`, Fleet 전체 명세 `fleet_robot_ids`, 담당 부분집합 `robot_ids`로 소유권을 선언한다.
+같은 Fleet의 모든 Bridge는 동일한 fleet_robot_ids를 사용하고 각 로봇을 담당하는 Bridge를 반드시 배치한다. Compose는 API와 Bridge에
 동일 FLEET_ID를 전달한다. 단독 launch에서도 FLEET_ID를 지정할 수 있다.
 
-Consumer group은 `<prefix>.<fleet_id>.<SHA-256(sorted robot_ids)>`로 결정한다.
+Consumer group은 `<prefix>.<fleet_id>.<ownership_generation>.<SHA-256(fleet_robot_ids, robot_ids)>`로 결정한다.
+두 로봇 목록은 정렬한 뒤 digest를 계산한다. ownership_generation은 기본 `1`이며 ROS 파라미터와
+`FLEET_OWNERSHIP_GENERATION` 환경 변수로 지정한다. 소유권을 바꿀 때마다 모든 Bridge의 세대를
+새 값으로 갱신하고 절대 재사용하지 않는다. `A → B → A` 복귀도 각각 세대 1, 2, 3을 사용한다.
+일반 재시작은 같은 세대를 유지해 committed offset을 복구한다. 세대 재사용을 통한 소유권 복귀는
+지원하지 않으며 운영자가 버전을 관리해야 한다.
 다른 Fleet이나 다른 로봇 집합이 같은 group의 파티션을 나눠 갖지 않게 한다.
-동일 Fleet의 복제 Bridge는 동일 로봇 집합과 그 로봇 전체에 접근할 수 있는 ROS/DDS 영역을 사용한다.
+동일 담당 범위의 복제 Bridge는 동일 로봇 집합과 그 로봇 전체에 접근할 수 있는 ROS/DDS 영역을 사용한다.
 로봇 ID는 플랫폼에서 유일해야 하며, 한 로봇에는 하나의 실행 주체만 둔다.
 소유권 변경은 자동 재배치 기능이 아니며 API 발행 중단과 기존 명령 처리를 마친 뒤 수행한다.
 
 다른 Fleet을 대상으로 하는 유효한 envelope는 해당 Fleet의 별도 group이 처리하므로 건너뛴다.
-자기 Fleet 내 소유하지 않은 로봇, 잘못된 cmd_id(UUID), command/data, 좌표 및 JSON은
+자기 Fleet의 fleet_robot_ids에는 있지만 다른 Bridge가 담당하는 명령은 정상 전달 대상이므로
+DLQ 없이 건너뛴다. 따라서 다른 Bridge의 정상 명령은 DLQ 장애에 의존하지 않는다.
+Fleet 전체 명세에도 없는 로봇, 잘못된 cmd_id(정규 소문자 UUID), command/data, 좌표 및 JSON은
 `dlq.command`로 원본 바이트(Base64), 원본 topic/partition/offset과 원인을 보존한다.
 DLQ 발행 확인 또는 ROS publish 성공 후 해당 메시지의 offset만 동기 커밋한다.
 ROS/DLQ/커밋 실패 시 같은 메시지를 재시도하고 뒤 메시지의 커밋으로 실패를 덮지 않는다.
@@ -57,7 +65,8 @@ fleet_id 없는 구 envelope는 새 Bridge의 유효 명령이 아니며 DLQ 대
 | 시나리오 | 준비 상태 | 자동 검증 | 수동 검증 |
 | --- | --- | --- | --- |
 | 정상·다중 Fleet | 별도 Fleet과 소유 로봇 | group 분리, 대상 Fleet만 ROS 전달 | 실제 Kafka→ROS→Ack |
-| 다른 소유 로봇 집합 | 같은 Fleet, 다른 robot_ids | group digest 분리 | 배치 설정 확인 |
+| 다른 소유 로봇 집합 | 같은 Fleet, 다른 robot_ids | group 분리, 다른 담당의 정상 명령은 DLQ 없이 통과 | Fleet 전체 명세·담당 배치 확인 |
+| 소유권 복귀 | A → B → A와 새 세대 | 세대별 group 분리 | 세대 값 재사용 금지 확인 |
 | 재전송 | 같은 cmd_id | 이동/정지 중복, 최신 Ack, TTL·상한 | ROS 재전송 후 위치 확인 |
 | 잘못된 payload·소유권 | 원본 바이트 보존 | DLQ 확인 후 정확한 메시지 커밋 | DLQ 조회 |
 | ROS·DLQ·커밋 실패 | 주입한 실패 | 원본 재시도, 뒤 offset 커밋 방지 | 재연결 복구 |

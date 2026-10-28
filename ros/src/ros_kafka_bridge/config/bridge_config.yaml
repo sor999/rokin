@@ -6,6 +6,11 @@ ros_kafka_bridge_node:
     kafka_group_id: "ros_kafka_bridge"
     # 브릿지가 구독/발행할 로봇 ID 목록
     fleet_id: "default"
+    ownership_generation: "1"
+    fleet_robot_ids:
+      - "robot_1"
+      - "robot_2"
+      - "robot_3"
     command_dlq_topic: "dlq.command"
     robot_ids:
       - "robot_1"

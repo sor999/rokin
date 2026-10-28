@@ -150,6 +150,7 @@ services:
     environment:
       ROS_DOMAIN_ID: 0
       FLEET_ID: ${FLEET_ID:-default}
+      FLEET_OWNERSHIP_GENERATION: ${FLEET_OWNERSHIP_GENERATION:-1}
     command: ["ros2", "launch", "ros_kafka_bridge", "full_demo.launch.py"]
     networks:
       - robot_net

@@ -18,7 +18,10 @@ def generate_launch_description():
             package='ros_kafka_bridge',
             executable='ros_kafka_bridge_node',
             name='ros_kafka_bridge_node',
-            parameters=[config, {'fleet_id': os.environ['FLEET_ID']} if 'FLEET_ID' in os.environ else {}],
+            parameters=[config, {key: os.environ[env] for key, env in (
+                ('fleet_id', 'FLEET_ID'),
+                ('ownership_generation', 'FLEET_OWNERSHIP_GENERATION'),
+            ) if env in os.environ}],
             output='screen',
         )
     ])

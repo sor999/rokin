@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock
 from confluent_kafka import TopicPartition
 
-from ros_kafka_bridge.commands import CommandRejected
+from ros_kafka_bridge.commands import CommandRejected, FleetCommandRouter
 from ros_kafka_bridge.consumer import KafkaCommandConsumer
 
 
@@ -159,3 +159,15 @@ class ConsumerTest(unittest.TestCase):
         self.consumer._process(self.client, self.producer, message(b'[' * 2000 + b'0' + b']' * 2000))
         self.assertEqual('dlq', self.events[0][0])
         self.assertEqual(('commit', 7), self.events[-1])
+
+    def test_another_bridge_normal_command_does_not_depend_on_dlq(self):
+        router = FleetCommandRouter('site-a', ['robot_2'], Mock(), fleet_robot_ids=['robot_1', 'robot_2'])
+        self.consumer._on_message = router.dispatch
+        self.producer.produce.side_effect = RuntimeError('DLQ unavailable')
+        payload = json.dumps({'fleet_id': 'site-a', 'robot_id': 'robot_1',
+                              'cmd_id': '00000000-0000-0000-0000-000000000001',
+                              'command': 'stop', 'data': {}}).encode()
+        record = message(payload)
+        self.consumer._process(self.client, self.producer, record)
+        self.producer.produce.assert_not_called()
+        self.client.commit.assert_called_once_with(message=record, asynchronous=False)

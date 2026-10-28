@@ -59,6 +59,7 @@ Flyway V3의 `robot_ack_state`가 명령별 전이를 관리한다. timestamp가
 
 API는 서버의 `FLEET_ID`를 Kafka Command의 `fleet_id`에 포함한다. Bridge는 Fleet과
 소유 robot_ids가 같은 복제본끼리만 consumer group을 공유한다. 유효하지 않은 명령과
-자기 Fleet 내 소유권 불일치는 `dlq.command`에 원본과 원인을 보존한 뒤 커밋한다.
+Fleet 전체 명세에도 없는 로봇은 `dlq.command`에 원본과 원인을 보존한 뒤 커밋한다.
+같은 Fleet의 다른 Bridge 담당 로봇은 DLQ 없이 건너뛰며 소유권 변경 시 새 세대를 사용한다.
 중복 실행 방지는 fake_robot의 cmd_id별 TTL 저장소에서 수행하며 진행 중인 이동은 만료시키지 않는다.
 배포 순서, group 형식, 실패 처리와 한계는 [ADR 0003](../decisions/0003-bridge-command-ownership.md)을 따른다.

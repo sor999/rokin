@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import uuid
 
 
@@ -85,6 +86,19 @@ class RosCommandIntegrationTest(unittest.TestCase):
             wait_for(lambda: count(stop_id, 'done') == 2)
             self.assertEqual('moving', robot.logic.get_status())
             self.assertEqual(next_move_id, robot.commands.pending_move_id)
+            original_stop = bridge._consumer.stop
+
+            def stopped_with_error():
+                original_stop()
+                raise RuntimeError('injected shutdown failure')
+
+            with patch.object(bridge._consumer, 'stop', side_effect=stopped_with_error), \
+                    patch.object(bridge._producer, 'flush', wraps=bridge._producer.flush) as flushed, \
+                    patch.object(Node, 'destroy_node', autospec=True) as destroyed:
+                with self.assertRaises(RuntimeError):
+                    bridge.destroy_node()
+                flushed.assert_called_once()
+                destroyed.assert_called_once_with(bridge)
         finally:
             executor.shutdown(timeout_sec=5)
             if spin is not None:
