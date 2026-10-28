@@ -20,6 +20,11 @@
 | Go Worker | `.agents/skills/go/SKILL.md` | `ARCHITECTURE.md`, `docs/domain/telemetry.md` |
 | Next.js Dashboard | `.agents/skills/nextjs/SKILL.md` | `ARCHITECTURE.md`, `docs/domain/telemetry.md` |
 | Git/PR | `.agents/skills/git-conventions/SKILL.md` | 이 파일의 안전과 변경 통제 |
+| 커밋 작성/실행 | `.agents/skills/commit/SKILL.md` | `.agents/skills/git-conventions/SKILL.md` |
+| 이슈 작성 | `.agents/skills/issue/SKILL.md` | `.github/ISSUE_TEMPLATE/` |
+| PR 작성/갱신 | `.agents/skills/pr/SKILL.md` | `.github/PULL_REQUEST_TEMPLATE.md` |
+| 코드/PR 리뷰 | `.agents/skills/review/SKILL.md` | 변경 영역의 기술 스킬, 이 파일의 코드 리뷰 규칙 |
+| 테스트 작성/실행 | `.agents/skills/test/SKILL.md` | `docs/conventions/verification.md`, 변경 영역의 기술 스킬 |
 | 모든 코드 주석 | `.agents/skills/comment-conventions/SKILL.md` | 해당 언어의 기술 스킬 |
 
 대상 영역의 코드를 바꾸기 전에 해당 스킬을 읽습니다. 여러 영역을 잇는 변경이면
