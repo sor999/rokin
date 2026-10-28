@@ -109,9 +109,18 @@ func (r *Repository) BatchInsertAck(ctx context.Context, rows []AckRow) error {
 	batch := &pgx.Batch{}
 	for _, row := range rows {
 		batch.Queue(
-			`INSERT INTO robot_ack (cmd_id, timestamp, robot_id, status, message)
-			 VALUES ($1, $2, $3, $4, $5)
-			 ON CONFLICT (cmd_id, status, timestamp) DO NOTHING`,
+			`WITH transition AS (
+                INSERT INTO robot_ack_state (cmd_id, timestamp, robot_id, status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (cmd_id) DO UPDATE
+                SET timestamp = EXCLUDED.timestamp, status = EXCLUDED.status
+                WHERE robot_ack_state.robot_id = EXCLUDED.robot_id
+                  AND robot_ack_state.status = 'accepted'
+                  AND EXCLUDED.status IN ('done', 'failed')
+                RETURNING cmd_id
+            )
+            INSERT INTO robot_ack (cmd_id, timestamp, robot_id, status, message)
+            SELECT cmd_id, $2, $3, $4, $5 FROM transition`,
 			row.CmdID, row.Timestamp, row.RobotID, row.Status, row.Message,
 		)
 	}
@@ -126,6 +135,9 @@ func (r *Repository) sendBatch(ctx context.Context, batch *pgx.Batch, count int)
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("batch exec [%d]: %w", i, err)
 		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("batch close: %w", err)
 	}
 	return nil
 }

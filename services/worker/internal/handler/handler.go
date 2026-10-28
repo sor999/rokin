@@ -562,6 +562,11 @@ func parseAck(payload []byte) (repository.AckRow, error) {
 	if err := json.Unmarshal(payload, &env); err != nil {
 		return repository.AckRow{}, fmt.Errorf("ack 파싱 실패: %w", err)
 	}
+	switch env.Status {
+	case "accepted", "done", "failed":
+	default:
+		return repository.AckRow{}, fmt.Errorf("지원하지 않는 ack status: %q", env.Status)
+	}
 	ts, err := time.Parse(time.RFC3339Nano, env.Timestamp)
 	if err != nil {
 		return repository.AckRow{}, fmt.Errorf("timestamp 파싱 실패: %w", err)

@@ -53,3 +53,13 @@ python3 -m compileall -q ros
 | 정상 흐름 | 필요한 fixture/서비스 | 테스트 또는 smoke 명령 | UI/토픽 기대 결과 |
 | 중복/재전송 | 동일 식별자 재사용 | 멱등성 단언 | 중복 동작 없음 |
 | 실패/재연결 | 연결 종료/잘못된 payload | 오류 상태 단언 | 복구와 표시 확인 |
+
+## Ack 스키마와 영속성 PostgreSQL 검증
+
+운영·개발 DB와 분리된 PostgreSQL 15 테스트 DB에만 연결합니다. 테스트가 임시 스키마를
+생성하고 정리하므로 해당 DB 계정에 스키마 생성 권한이 필요합니다.
+
+- API: `services/api`에서 `MIGRATION_TEST_URL=jdbc:postgresql://localhost:25417/rokin_issue17 ./gradlew test --tests '*AckMigrationTest' --rerun-tasks`
+- Worker: `services/worker`에서 `TEST_DATABASE_URL=postgres://postgres:rokin_test_only@localhost:25417/rokin_issue17?sslmode=disable go test ./internal/repository -v`
+- 위 연결값은 격리 테스트용 예시입니다. API는 `MIGRATION_TEST_USER`, `MIGRATION_TEST_PASSWORD`로 계정을 바꿀 수 있습니다. 기본값은 `postgres`, `rokin_test_only`입니다.
+- 환경 변수가 없으면 PostgreSQL 전용 테스트는 건너뜁니다. 일반 H2 테스트 통과만으로 마이그레이션과 PostgreSQL 동시성을 검증했다고 보고하지 않습니다.
