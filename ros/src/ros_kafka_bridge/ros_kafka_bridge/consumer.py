@@ -67,7 +67,7 @@ class KafkaCommandConsumer:
     def _process(self, consumer, producer, message):
         try:
             value = json.loads(message.value())
-        except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as error:
+        except (ValueError, UnicodeDecodeError, TypeError, RecursionError) as error:
             self._send_dlq(producer, message, error)
         else:
             try:

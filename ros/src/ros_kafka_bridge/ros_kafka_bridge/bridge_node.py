@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 import uuid
 
 import rclpy
@@ -150,6 +151,7 @@ class RosKafkaBridgeNode(Node):
 
 
 def main(args=None):
+    logging.basicConfig(level=logging.INFO)
     rclpy.init(args=args)
     node = RosKafkaBridgeNode()
     try:

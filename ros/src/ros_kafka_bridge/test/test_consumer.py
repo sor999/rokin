@@ -153,3 +153,9 @@ class ConsumerTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.consumer._on_assign(self.client, [partition])
         self.assertFalse(self.consumer.ready.is_set())
+
+    def test_excessively_nested_json_is_dlq_not_retried_forever(self):
+        self.callback.side_effect = CommandRejected('Command must be a JSON object')
+        self.consumer._process(self.client, self.producer, message(b'[' * 2000 + b'0' + b']' * 2000))
+        self.assertEqual('dlq', self.events[0][0])
+        self.assertEqual(('commit', 7), self.events[-1])

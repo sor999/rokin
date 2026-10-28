@@ -79,3 +79,8 @@ python3 -m unittest discover -s ros/src/ros_kafka_bridge/test -p test_kafka_inte
 
 기본 단위 테스트에서는 해당 환경 변수가 없으면 Kafka 통합 테스트를 건너뜁니다.
 실제 ROS2 토픽·DDS·물리 로봇 수신은 이 검증에 포함되지 않습니다.
+
+ROS2 Humble에서 `ROS_KAFKA_TEST_BROKER`를 지정하고 `test_ros_integration.py`를 실행하면
+실제 ROS 명령/Ack 토픽으로 재전송된 이동이 재개되지 않고 과거 정지가 새 이동을 중단하지
+않는지 확인합니다. 테스트는 분리된 Kafka의 `cmd.robot`, `ack.robot`, `dlq.command`와
+telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메인도 사용합니다.
