@@ -23,8 +23,10 @@ class RosCommandIntegrationTest(unittest.TestCase):
         admin = AdminClient({'bootstrap.servers': broker})
         existing = admin.list_topics(timeout=10).topics
         topics = ('cmd.robot', 'dlq.command', 'ack.robot', 'telemetry.pose', 'telemetry.battery', 'telemetry.status')
-        for future in admin.create_topics([NewTopic(topic, 3, 1) for topic in topics if topic not in existing]).values():
-            future.result(timeout=15)
+        missing = [NewTopic(topic, 3, 1) for topic in topics if topic not in existing]
+        if missing:
+            for future in admin.create_topics(missing).values():
+                future.result(timeout=15)
         rclpy.init(args=['--ros-args', '-p', 'kafka_broker:=' + broker,
                         '-p', 'fleet_id:=' + fleet, '-p', 'robot_ids:=[robot_1]'])
         nodes = []
