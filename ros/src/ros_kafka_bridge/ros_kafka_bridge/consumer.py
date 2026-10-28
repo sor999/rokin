@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class KafkaCommandConsumer:
+    """명령 전달 또는 DLQ 발행 확인 후 해당 메시지만 동기 커밋한다."""
+
     def __init__(self, broker: str, group_id: str, topic: str,
                  on_message: Callable[[dict], None], dlq_topic: str = 'dlq.command',
                  consumer_factory=Consumer, producer_factory=Producer, retry_seconds=1.0):
@@ -34,12 +36,14 @@ class KafkaCommandConsumer:
         self._thread = None
 
     def start(self) -> None:
+        """백그라운드 소비를 시작하며 할당과 초기 offset 확인 후 ready를 설정한다."""
         self._stop.clear()
         self.ready.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True, name='kafka-consumer')
         self._thread.start()
 
     def stop(self) -> None:
+        """소비 종료를 요청하고, 15초 안에 스레드가 끝나지 않으면 예외를 발생시킨다."""
         self._stop.set()
         self.ready.clear()
         if self._thread:
@@ -48,6 +52,10 @@ class KafkaCommandConsumer:
                 raise RuntimeError('Command consumer did not stop')
 
     def _send_dlq(self, producer, message, reason):
+        """원본과 실패 원인을 보존하며 Kafka의 DLQ 전달 확인을 기다린다.
+
+        전달 실패나 시간 초과는 예외로 전파해 원본 offset의 커밋을 막는다.
+        """
         payload = {
             'source_topic': message.topic(),
             'source_partition': message.partition(),
@@ -65,6 +73,7 @@ class KafkaCommandConsumer:
             raise RuntimeError('Command DLQ delivery was not acknowledged')
 
     def _process(self, consumer, producer, message):
+        """콜백 성공 또는 DLQ 전달 확인 이후에만 이 메시지의 offset을 커밋한다."""
         try:
             value = json.loads(message.value())
         except (ValueError, UnicodeDecodeError, TypeError, RecursionError) as error:
@@ -82,6 +91,11 @@ class KafkaCommandConsumer:
             raise RuntimeError('Command offset commit failed')
 
     def _on_assign(self, consumer, partitions):
+        """기존 offset에서 재개하고 새 파티션은 latest를 먼저 저장한 뒤 ready를 설정한다.
+
+        초기 offset 저장에 실패하면 준비 완료로 표시하지 않는다. 첫 명령 처리 실패 후
+        재연결해도 latest로 건너뛰지 않고 저장된 시작 위치에서 재시도한다.
+        """
         self.ready.clear()
         committed = consumer.committed(partitions, timeout=10.0)
         self._check_commit(committed)
