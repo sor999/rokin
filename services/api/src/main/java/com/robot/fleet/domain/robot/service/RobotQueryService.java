@@ -60,7 +60,11 @@ public class RobotQueryService {
     }
 
     public PoseDto getLatestPose(String robotId) {
-        return poseRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+        var registration = simulations.list().stream().filter(r -> r.robotId().equals(robotId)).findFirst();
+        if (registration.isPresent() && registration.get().runtimeId() == null) return null;
+        String runtimeId = registration.map(r -> r.runtimeId()).orElse(null);
+        return (runtimeId == null ? poseRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+                : poseRepo.findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId))
                 .map(p -> PoseDto.of(p.getX(), p.getY(), p.getOccurredAt()))
                 .orElse(null);
     }
@@ -74,7 +78,11 @@ public class RobotQueryService {
     }
 
     public BatteryDto getLatestBattery(String robotId) {
-        return batteryRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+        var registration = simulations.list().stream().filter(r -> r.robotId().equals(robotId)).findFirst();
+        if (registration.isPresent() && registration.get().runtimeId() == null) return null;
+        String runtimeId = registration.map(r -> r.runtimeId()).orElse(null);
+        return (runtimeId == null ? batteryRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+                : batteryRepo.findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId))
                 .map(b -> BatteryDto.of(b.getLevel(), b.getOccurredAt()))
                 .orElse(null);
     }

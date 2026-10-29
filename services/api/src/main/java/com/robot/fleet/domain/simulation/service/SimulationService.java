@@ -115,6 +115,11 @@ public class SimulationService implements ApplicationRunner {
     }
 
     @Transactional(readOnly = true)
+    public boolean acceptsTelemetry(String robotId, String runtimeId) {
+        return repository.acceptsTelemetry(fleetId, robotId, runtimeId);
+    }
+
+    @Transactional(readOnly = true)
     public Map<String, Object> commandContext(String robotId) {
         SimulationDto robot = list().stream().filter(r -> r.robotId().equals(robotId)).findFirst().orElse(null);
         if (robot == null) {

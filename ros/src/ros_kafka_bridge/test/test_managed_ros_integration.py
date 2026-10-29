@@ -114,3 +114,15 @@ class ManagedHttpBatchTest(unittest.TestCase):
         self.assertEqual([100, 100, 1], [len(batch) for batch in batches])
         self.assertEqual(201, sum(len(batch) for batch in batches))
         self.assertTrue(all(report['runtimeId'] == 'current-runtime' for batch in batches for report in batch))
+
+    def test_status_callback_drops_non_object_json_without_killing_runtime(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from ros_kafka_bridge.bridge_node import RosKafkaBridgeNode
+        producer = Mock()
+        bridge = SimpleNamespace(_runtime_id='current-runtime', _producer=producer, get_logger=Mock(return_value=Mock()))
+        for value in ([], 'text', 1, None, True):
+            RosKafkaBridgeNode._on_status(bridge, 'robot_4', SimpleNamespace(data=json.dumps(value)))
+        producer.produce.assert_not_called()
+        RosKafkaBridgeNode._on_status(bridge, 'robot_4', SimpleNamespace(data=json.dumps({'type': 'status'})))
+        self.assertEqual('current-runtime', producer.produce.call_args.kwargs['value']['simulation_runtime_id'])

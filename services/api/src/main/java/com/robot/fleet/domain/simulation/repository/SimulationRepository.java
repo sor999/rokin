@@ -76,4 +76,14 @@ public class SimulationRepository {
         jdbc.update("INSERT INTO simulation_runtime_session(runtime_id, fleet_id) VALUES (?, ?)", runtimeId, fleetId);
     }
 
+    public boolean acceptsTelemetry(String fleetId, String robotId, String runtimeId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT CASE WHEN EXISTS(SELECT 1 FROM simulation_robot WHERE robot_id = ?)
+                THEN EXISTS(SELECT 1 FROM simulation_robot WHERE robot_id = ? AND fleet_id = ?
+                    AND desired_state = 'RUNNING' AND ? = (
+                        SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1))
+                ELSE ? END
+                """, Boolean.class, robotId, robotId, fleetId, runtimeId, fleetId, runtimeId == null));
+    }
+
 }

@@ -8,6 +8,3 @@ CREATE INDEX idx_simulation_runtime_epoch ON simulation_runtime_session (fleet_i
 ALTER TABLE telemetry_pose ADD COLUMN simulation_runtime_id VARCHAR(36);
 ALTER TABLE telemetry_battery ADD COLUMN simulation_runtime_id VARCHAR(36);
 ALTER TABLE telemetry_status ADD COLUMN simulation_runtime_id VARCHAR(36);
-CREATE INDEX idx_pose_runtime ON telemetry_pose (robot_id, simulation_runtime_id, timestamp DESC);
-CREATE INDEX idx_battery_runtime ON telemetry_battery (robot_id, simulation_runtime_id, timestamp DESC);
-CREATE INDEX idx_status_runtime ON telemetry_status (robot_id, simulation_runtime_id, timestamp DESC);

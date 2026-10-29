@@ -64,12 +64,12 @@ public class TelemetryStreamService {
     }
 
     public void broadcast(TelemetryEvent event) {
+        if (event.occurredAt() == null) throw new IllegalArgumentException("Telemetry timestamp is required");
         if (!event.type().equals("offline")) {
             lastSeenMap.compute(event.robotId(), (id, previous) -> {
-                if (previous != null && previous.isAfter(event.occurredAt())) return previous;
                 if (event.runtimeId() == null) runtimeIds.remove(id);
                 else runtimeIds.put(id, event.runtimeId());
-                return event.occurredAt();
+                return OffsetDateTime.now();
             });
         }
         broadcastCounter.increment();

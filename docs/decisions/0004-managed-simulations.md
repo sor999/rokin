@@ -47,5 +47,14 @@ SSE의 `runtimeId`, REST 로봇 DTO의 `runtimeId`를 클라이언트의 등록 
 이전 실행의 늦은 이벤트·REST 응답을 버린다. 상세 화면의 이력은 runtimeId 쿼리로 현재
 실행에 한정하고, 쿼리를 생략한 기존 이력 API는 과거 실행 데이터도 보존해 제공한다.
 
-전환 시 Flyway V5를 먼저 적용한 뒤 Worker와 관리 ROS 런타임을 함께 갱신한다.
+전환 시 Flyway V6를 먼저 적용한 뒤 Worker와 관리 ROS 런타임을 함께 갱신한다.
 정적 메시지에서 runtime 필드를 생략하는 기존 경로는 nullable 값으로 호환한다.
+
+텔레메트리 인덱스는 V6에서 CONCURRENTLY로 생성하며 같은 이름의 .sql.conf에서
+executeInTransaction=false를 지정한다. 신규 V5에는 런타임 메타데이터와 컬럼 추가만 둔다.
+현재 세션과 일치하는 이벤트만 수신하고 온라인 판정에는 서버 수신 시각을 사용한다.
+따라서 이전 인스턴스의 미래 시각 이벤트가 현재 로봇의 온라인 복구를 막지 않는다.
+
+Flyway의 PostgreSQL advisory lock은 spring.flyway.postgresql.transactional-lock=false로
+세션 잠금을 사용한다. 동시 인덱스 생성이 Flyway 자체 트랜잭션을 기다리는 상황을 방지한다.
+설정 근거: https://documentation.red-gate.com/flyway/reference/configuration/flyway-namespace/flyway-postgresql-namespace/flyway-postgresql-transactional-lock-setting

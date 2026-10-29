@@ -188,4 +188,50 @@ class SimulationServiceTest {
         assertThat(dto.battery()).isNull();
     }
 
+    private void pose(String robot, String runtime, double x) {
+        jdbc.update("INSERT INTO telemetry_pose(event_id,timestamp,robot_id,x,y,simulation_runtime_id,created_at,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), robot, x, 2, runtime);
+    }
+
+    private void battery(String robot, String runtime, double level) {
+        jdbc.update("INSERT INTO telemetry_battery(event_id,timestamp,robot_id,level,simulation_runtime_id,created_at,updated_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), robot, level, runtime);
+    }
+
+    @Test @DisplayName("최신 pose·battery는 pending·이전 실행·현재 실행·정적 로봇을 구분한다")
+    void latestTelemetry_FiltersManagedRuntimeAndPreservesStatic() {
+        // given
+        jdbc.update("DELETE FROM simulation_runtime_session");
+        service.create(request("managed"));
+        pose("managed", "old", 99); battery("managed", "old", 20);
+        // when, then: pending
+        assertThat(queries.getLatestPose("managed")).isNull();
+        assertThat(queries.getLatestBattery("managed")).isNull();
+        service.registerRuntime(RUNTIME);
+        // when, then: only retired rows
+        assertThat(queries.getLatestPose("managed")).isNull();
+        assertThat(queries.getLatestBattery("managed")).isNull();
+        pose("managed", RUNTIME, 3); battery("managed", RUNTIME, 90);
+        // when, then: current rows
+        assertThat(queries.getLatestPose("managed").x()).isEqualTo(3);
+        assertThat(queries.getLatestBattery("managed").level()).isEqualTo(90);
+        pose("static", null, 5); battery("static", null, 80);
+        // when, then: unregistered static rows
+        assertThat(queries.getLatestPose("static").x()).isEqualTo(5);
+        assertThat(queries.getLatestBattery("static").level()).isEqualTo(80);
+    }
+
+    @Test @DisplayName("텔레메트리 수신은 현재 런타임과 삭제 의도를 기준으로 허용한다")
+    void acceptsTelemetry_FencesRetiredAndDeletedRobots() {
+        // given
+        service.create(request("managed"));
+        // when, then
+        assertThat(service.acceptsTelemetry("managed", RUNTIME)).isTrue();
+        assertThat(service.acceptsTelemetry("managed", "old")).isFalse();
+        service.delete("managed");
+        assertThat(service.acceptsTelemetry("managed", RUNTIME)).isFalse();
+        assertThat(service.acceptsTelemetry("static", null)).isTrue();
+        assertThat(service.acceptsTelemetry("unregistered", RUNTIME)).isFalse();
+    }
+
 }

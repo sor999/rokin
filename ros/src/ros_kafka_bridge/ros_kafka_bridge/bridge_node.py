@@ -137,6 +137,9 @@ class RosKafkaBridgeNode(Node):
         except json.JSONDecodeError:
             self.get_logger().warning(f"[Bridge] status JSON 파싱 실패 (robot={robot_id})")
             return
+        if not isinstance(payload, dict):
+            self.get_logger().warning(f'[Bridge] status JSON 객체가 아님 (robot={robot_id})')
+            return
         if self._runtime_id is not None:
             payload['simulation_runtime_id'] = self._runtime_id
         self._producer.produce('telemetry.status', key=robot_id, value=payload)
