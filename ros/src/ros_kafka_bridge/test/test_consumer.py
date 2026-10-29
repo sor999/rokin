@@ -171,3 +171,17 @@ class ConsumerTest(unittest.TestCase):
         self.consumer._process(self.client, self.producer, record)
         self.producer.produce.assert_not_called()
         self.client.commit.assert_called_once_with(message=record, asynchronous=False)
+
+    def test_nonfinite_extra_data_is_dlq_before_ros_publish(self):
+        published = Mock()
+        router = FleetCommandRouter('site-a', ['robot_1'], published)
+        self.consumer._on_message = router.dispatch
+        payload = (b'{"fleet_id":"site-a","robot_id":"robot_1",'
+                   b'"cmd_id":"00000000-0000-0000-0000-000000000001",'
+                   b'"command":"stop","data":{"extra":1e999}}')
+        record = message(payload)
+        self.consumer._process(self.client, self.producer, record)
+        published.assert_not_called()
+        self.assertEqual(payload, base64.b64decode(self.events[0][1]['original_payload_base64']))
+        self.assertEqual('delivered', self.events[1][0])
+        self.assertEqual(('commit', 7), self.events[2])

@@ -7,6 +7,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -18,7 +19,7 @@ def generate_launch_description():
             package='ros_kafka_bridge',
             executable='ros_kafka_bridge_node',
             name='ros_kafka_bridge_node',
-            parameters=[config, {key: os.environ[env] for key, env in (
+            parameters=[config, {key: ParameterValue(os.environ[env], value_type=str) for key, env in (
                 ('fleet_id', 'FLEET_ID'),
                 ('ownership_generation', 'FLEET_OWNERSHIP_GENERATION'),
             ) if env in os.environ}],

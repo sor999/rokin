@@ -77,6 +77,10 @@ class FleetCommandRouter:
         data = command.get('data')
         if action not in ('stop', 'move_to') or not isinstance(data, dict):
             raise CommandRejected('Invalid command or data')
+        try:
+            json.dumps(data, allow_nan=False)
+        except (ValueError, TypeError, OverflowError, RecursionError):
+            raise CommandRejected('Command data must contain finite JSON values') from None
         if action == 'move_to':
             for axis in ('x', 'y'):
                 value = data.get(axis)

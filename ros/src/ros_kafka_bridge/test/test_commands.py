@@ -85,3 +85,26 @@ class FleetRouterTest(unittest.TestCase):
     def test_local_ownership_must_be_in_fleet_manifest(self):
         with self.assertRaises(ValueError):
             FleetCommandRouter('site-a', ['robot_2'], self.sent.append, fleet_robot_ids=['robot_1'])
+
+    def test_nonfinite_values_anywhere_in_data_are_rejected_before_publish(self):
+        for action in ('stop', 'move_to'):
+            for bad in (float('inf'), float('-inf'), float('nan')):
+                for extra in (bad, {'nested': [0, bad]}, [{'value': bad}]):
+                    data = {'extra': extra}
+                    if action == 'move_to':
+                        data.update(x=1, y=2)
+                    with self.subTest(action=action, extra=extra), self.assertRaises(CommandRejected):
+                        self.router.dispatch(dict(self.command, command=action, data=data))
+        self.assertEqual([], self.sent)
+
+    def test_overflowing_json_number_in_stop_data_is_rejected(self):
+        import json
+        command = dict(self.command, command='stop', data=json.loads('{"extra": 1e999}'))
+        with self.assertRaises(CommandRejected):
+            self.router.dispatch(command)
+        self.assertEqual([], self.sent)
+
+    def test_finite_nested_extra_data_is_preserved(self):
+        command = dict(self.command, command='stop', data={'extra': {'values': [1, 2.5, None, True]}})
+        self.router.dispatch(command)
+        self.assertEqual([command], self.sent)
