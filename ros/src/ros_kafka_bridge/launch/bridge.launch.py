@@ -3,11 +3,11 @@
 실제 운영에서는 full_demo.launch.py를 사용해 fake_robot과 함께 기동한다.
 """
 import os
+import json
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -19,10 +19,13 @@ def generate_launch_description():
             package='ros_kafka_bridge',
             executable='ros_kafka_bridge_node',
             name='ros_kafka_bridge_node',
-            parameters=[config, {key: ParameterValue(os.environ[env], value_type=str) for key, env in (
+            parameters=[config],
+            # Humble의 dict→YAML 재직렬화에서 문자열 인용이 사라지므로 ROS CLI로 전달한다.
+            ros_arguments=[argument for key, env in (
                 ('fleet_id', 'FLEET_ID'),
                 ('ownership_generation', 'FLEET_OWNERSHIP_GENERATION'),
-            ) if env in os.environ}],
+            ) if env in os.environ
+                for argument in ('-p', f'{key}:={json.dumps(os.environ[env])}')],
             output='screen',
         )
     ])
