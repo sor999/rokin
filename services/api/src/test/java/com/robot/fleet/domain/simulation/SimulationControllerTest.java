@@ -66,4 +66,18 @@ class SimulationControllerTest {
         verify(service).report(new com.robot.fleet.domain.simulation.dto.SimulationReport("robot_4", 1, "RUNNING", null, runtime));
     }
 
+    @Test @DisplayName("런타임 등록은 토큰 없이 거부하고 인증 후에만 서비스에 전달한다")
+    void internalRuntime_RequiresToken() throws Exception {
+        // given
+        String runtime = "00000000-0000-0000-0000-000000000001";
+        String body = "{\"runtimeId\":\"" + runtime + "\"}";
+        // when, then
+        mvc.perform(post("/internal/simulations/runtime").contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(service);
+        mvc.perform(post("/internal/simulations/runtime").header("X-Simulator-Token", "test-only-token")
+                .contentType("application/json").content(body)).andExpect(status().isNoContent());
+        verify(service).registerRuntime(runtime);
+    }
+
 }

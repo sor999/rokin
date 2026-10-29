@@ -110,6 +110,8 @@ class ManagedHttpBatchTest(unittest.TestCase):
         runtime.stop_event.is_set.side_effect = [False, True]
         runtime.request = Mock(return_value={'fleetId': 'default', 'simulations': []})
         SimulationManager.sync(runtime)
+        self.assertEqual(('/internal/simulations/runtime', {'runtimeId': 'current-runtime'}),
+                         runtime.request.call_args_list[0].args)
         batches = [call.args[1] for call in runtime.request.call_args_list if call.args[0] == '/internal/simulations/reports']
         self.assertEqual([100, 100, 1], [len(batch) for batch in batches])
         self.assertEqual(201, sum(len(batch) for batch in batches))

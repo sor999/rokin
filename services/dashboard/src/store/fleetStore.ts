@@ -37,6 +37,7 @@ interface FleetStore {
 function emptyRobot(robotId: string): RobotState {
   return {
     robotId,
+    runtimeId: null,
     online: false,
     lastSeen: null,
     pose: null,
@@ -56,15 +57,18 @@ export const useFleetStore = create<FleetStore>((set) => ({
     const simulations = { ...prev.simulations };
     for (const item of list) {
       const current = simulations[item.robotId];
+      if (current?.version === item.version && current.runtimeId && !item.runtimeId) continue;
       if (!current || current.version <= item.version) simulations[item.robotId] = item;
     }
     const robots: Record<string, RobotState> = {};
     for (const item of Object.values(simulations)) {
       if (item.desiredState === "DELETED") continue;
       const previous = prev.simulations?.[item.robotId];
-      const restarted = previous?.runtimeId && item.runtimeId && previous.runtimeId !== item.runtimeId;
-      const existing = restarted ? emptyRobot(item.robotId) : prev.robots[item.robotId] ?? emptyRobot(item.robotId);
-      robots[item.robotId] = item.state === "RUNNING" ? existing : { ...existing, online: false };
+      const source = prev.robots[item.robotId];
+      const reset = source?.runtimeId !== item.runtimeId || (!previous && !item.runtimeId);
+      const existing = reset ? emptyRobot(item.robotId) : source ?? emptyRobot(item.robotId);
+      robots[item.robotId] = { ...existing, runtimeId: item.runtimeId,
+        online: item.state === "RUNNING" && existing.online };
     }
     return { simulations, robots };
   }),
@@ -84,7 +88,7 @@ export const useFleetStore = create<FleetStore>((set) => ({
       const existing = robots[dto.robotId];
       if (existing?.lastSeen && (!dto.lastSeen || existing.lastSeen >= dto.lastSeen)) continue;
       robots[dto.robotId] = {
-        ...dto, state: dto.state ?? "unknown",
+        ...dto, runtimeId: dto.runtimeId ?? null, state: dto.state ?? "unknown",
         trail: existing?.trail.length ? existing.trail : dto.pose ? [{ x: dto.pose.x, y: dto.pose.y }] : [],
       };
     }
@@ -111,7 +115,7 @@ export const useFleetStore = create<FleetStore>((set) => ({
       const runtimeId = prev.simulations?.[event.robotId]?.runtimeId;
       if (runtimeId && event.runtimeId !== runtimeId) return {};
       const existing = prev.robots[event.robotId] ?? emptyRobot(event.robotId);
-      const updated = { ...existing, lastSeen: event.timestamp };
+      const updated = { ...existing, runtimeId: event.runtimeId ?? null, lastSeen: event.timestamp };
 
       switch (event.type) {
         case "pose": {

@@ -68,3 +68,22 @@ test('새 runtime 이후 도착한 이전 실행의 SSE와 REST를 거부한다'
   state.getState().upsertFromSSE({ ...pose(), runtimeId: 'new' });
   assert.equal(state.getState().robots.robot_4.pose.x, 2);
 });
+
+test('첫 등록 스냅샷은 이전 REST 실행의 위치·배터리·궤적을 지운다', () => {
+  const state = store();
+  state.getState().initFromRest([{ robotId: 'robot_4', runtimeId: 'old', online: true,
+    lastSeen: pose().timestamp, pose: {x: 99, y: 99, timestamp: pose().timestamp}, battery: {level: 1}, state: 'moving' }]);
+  state.getState().syncSimulations([simulation({ runtimeId: 'new', state: 'RUNNING' })]);
+  assert.equal(state.getState().robots.robot_4.pose, null);
+  assert.equal(state.getState().robots.robot_4.battery, null);
+  assert.deepEqual(state.getState().robots.robot_4.trail, []);
+});
+test('첫 스냅샷과 일치하는 데이터는 보존하고 늦은 생성 응답의 null runtime은 거부한다', () => {
+  const state = store();
+  state.getState().upsertFromSSE({ ...pose(), runtimeId: 'new' });
+  state.getState().syncSimulations([simulation({ runtimeId: 'new', state: 'RUNNING' })]);
+  assert.equal(state.getState().robots.robot_4.pose.x, 2);
+  state.getState().syncSimulations([simulation()]);
+  assert.equal(state.getState().simulations.robot_4.runtimeId, 'new');
+  assert.equal(state.getState().robots.robot_4.pose.x, 2);
+});

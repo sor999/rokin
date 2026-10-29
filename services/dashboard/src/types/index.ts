@@ -67,6 +67,7 @@ export interface AckDto {
 
 // 클라이언트 전역 상태
 export interface RobotState {
+  runtimeId: string | null;
   robotId: string;
   online: boolean;
   lastSeen: string | null;
