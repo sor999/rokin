@@ -4,6 +4,7 @@ Docker 컨테이너에서 이 파일을 사용해 단일 프로세스 그룹으�
 DDS 로컬 통신이 보장된다.
 """
 import os
+import json
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -29,7 +30,12 @@ def generate_launch_description():
             package='ros_kafka_bridge',
             executable='ros_kafka_bridge_node',
             name='ros_kafka_bridge_node',
-            parameters=[bridge_config],
+            # Humble의 dict→YAML 재직렬화에서 문자열 인용이 사라지므로 ROS CLI로 전달한다.
+            ros_arguments=['--params-file', bridge_config, *[argument for key, env in (
+                ('fleet_id', 'FLEET_ID'),
+                ('ownership_generation', 'FLEET_OWNERSHIP_GENERATION'),
+            ) if env in os.environ
+                for argument in ('-p', f'ros_kafka_bridge_node:{key}:={json.dumps(os.environ[env])}')]],
             output='screen',
         ),
     ])

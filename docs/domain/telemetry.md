@@ -15,7 +15,7 @@
 | Pose | `event_id` | DB unique/`ON CONFLICT DO NOTHING` | `telemetry.pose` |
 | Battery | `event_id` | DB unique/`ON CONFLICT DO NOTHING` | `telemetry.battery` |
 | Status | `event_id` | DB unique/`ON CONFLICT DO NOTHING` | `telemetry.status` |
-| Command | `cmd_id` | 로봇 동작을 같은 명령에 한 번만 적용 | `cmd.robot` |
+| Command | `cmd_id` | 로봇 프로세스의 TTL 범위에서 같은 명령 재적용 방지 | `cmd.robot` |
 | Ack | `cmd_id` + 상태 전이 | 영속 이력은 최초 상태와 accepted → done/failed만 적재 | `ack.robot` |
 | 처리 실패 | 원본 메시지 식별자 | 원본과 실패 원인을 보존 | `dlq.telemetry` |
 
@@ -29,7 +29,7 @@
 - API 접수 응답은 정지 완료를 의미하지 않는다. 화면은 해당 `cmd_id`의 로봇 Ack `done`을 받은 뒤 `Stopped`로 표시한다.
 - 로봇은 현재 위치를 유지하고 `idle`로 전환한다. 진행 중이던 이동은 `failed`와 `Movement interrupted by stop`으로 끝내고, 정지 명령에는 `done`을 보낸다.
 - 정지 확인 제한 시간은 5초다. 초과 시 정지 여부를 확인하지 못했다고 표시하며 `Retry Stop`은 정지만 재요청한다. 연결이 끊기면 전송·재시도 버튼을 비활성화한다.
-- 이 기능은 시뮬레이터의 원격 동작 정지다. 연결 단절 중 정지 보장, 영속적인 명령 중복 방지와 재접속 후 결과 복원은 별도 과제다.
+- 이 기능은 시뮬레이터의 원격 동작 정지다. 연결 단절 중 정지 보장, 프로세스 재시작 후까지 유지되는 명령 중복 방지와 재접속 후 결과 복원은 별도 과제다.
 
 | 시나리오 | 자동 검증 | 통합 검증 |
 | --- | --- | --- |
@@ -54,3 +54,12 @@ Flyway V3의 `robot_ack_state`가 명령별 전이를 관리한다. timestamp가
 재적재하지 않으며, done/failed 이후 accepted나 다른 종료 상태는 무시한다. 기존 로그는
 삭제하지 않고 보존한다. API 실시간 브로드캐스트 중복 방지는 별도 범위다.
 상세 결정과 배포 순서는 [ADR 0002](../decisions/0002-ack-persistence.md)를 따른다.
+
+## Command 소유권
+
+API는 서버의 `FLEET_ID`를 Kafka Command의 `fleet_id`에 포함한다. Bridge는 Fleet과
+소유 robot_ids가 같은 복제본끼리만 consumer group을 공유한다. 유효하지 않은 명령과
+Fleet 전체 명세에도 없는 로봇은 `dlq.command`에 원본과 원인을 보존한 뒤 커밋한다.
+같은 Fleet의 다른 Bridge 담당 로봇은 DLQ 없이 건너뛰며 소유권 변경 시 새 세대를 사용한다.
+중복 실행 방지는 fake_robot의 cmd_id별 TTL 저장소에서 수행하며 진행 중인 이동은 만료시키지 않는다.
+배포 순서, group 형식, 실패 처리와 한계는 [ADR 0003](../decisions/0003-bridge-command-ownership.md)을 따른다.

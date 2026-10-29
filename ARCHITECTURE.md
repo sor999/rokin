@@ -32,7 +32,8 @@ API/Flyway 마이그레이션을 먼저 적용해야 합니다. Compose는 API�
 ## 데이터 흐름의 불변식
 
 - Telemetry는 단방향 관측 데이터이며 동일한 `event_id`를 두 번 적용하지 않습니다.
-- Command는 `cmd_id`로 식별하며 재전송되어도 로봇 동작을 중복 적용하지 않아야 합니다.
+- Command는 `cmd_id`와 `fleet_id`로 라우팅하며 로봇 프로세스의 TTL 범위에서 중복 실행을 막습니다.
+  Fleet 소유권과 group 규칙은 [ADR 0003](docs/decisions/0003-bridge-command-ownership.md)을 따릅니다.
 - Ack는 Command의 수명주기 상태입니다. `accepted`, 진행/완료, 실패 상태의 의미를 생산자와 소비자가 공유합니다.
 - 실시간 스트림은 유실 또는 재연결될 수 있습니다. Dashboard는 REST 초기 상태 이후 SSE/WS 이벤트를 합성합니다.
 - Kafka 전달은 at-least-once일 수 있으므로 소비 성공 전에 영속성/후속 처리 결과를 확인합니다.
