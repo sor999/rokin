@@ -9,5 +9,7 @@ import java.util.Optional;
 
 public interface TelemetryBatteryRepository extends JpaRepository<TelemetryBattery, Long> {
     Optional<TelemetryBattery> findTopByRobotIdOrderByOccurredAtDesc(String robotId);
+    Optional<TelemetryBattery> findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(String robotId, String runtimeId);
+    List<TelemetryBattery> findByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(String robotId, String runtimeId, Pageable pageable);
     List<TelemetryBattery> findByRobotIdOrderByOccurredAtDesc(String robotId, Pageable pageable);
 }

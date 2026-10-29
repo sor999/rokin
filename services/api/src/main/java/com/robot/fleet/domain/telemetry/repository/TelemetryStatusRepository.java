@@ -7,4 +7,5 @@ import java.util.Optional;
 
 public interface TelemetryStatusRepository extends JpaRepository<TelemetryStatus, Long> {
     Optional<TelemetryStatus> findTopByRobotIdOrderByOccurredAtDesc(String robotId);
+    Optional<TelemetryStatus> findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(String robotId, String runtimeId);
 }

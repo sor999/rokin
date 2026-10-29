@@ -12,6 +12,7 @@ public record PoseTelemetryDto(
         String robotId,
         @JsonProperty("timestamp")
         OffsetDateTime occurredAt,
+        String runtimeId,
         PoseTelemetryDataDto data
 ) implements TelemetryEvent {
 
@@ -21,6 +22,6 @@ public record PoseTelemetryDto(
             double x,
             double y
     ) {
-        return new PoseTelemetryDto("pose", robotId, occurredAt, new PoseTelemetryDataDto(x, y));
+        return new PoseTelemetryDto("pose", robotId, occurredAt, null, new PoseTelemetryDataDto(x, y));
     }
 }

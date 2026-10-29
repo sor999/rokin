@@ -12,6 +12,7 @@ public record StatusTelemetryDto(
         String robotId,
         @JsonProperty("timestamp")
         OffsetDateTime occurredAt,
+        String runtimeId,
         StatusTelemetryDataDto data
 ) implements TelemetryEvent {
 
@@ -20,6 +21,6 @@ public record StatusTelemetryDto(
             OffsetDateTime occurredAt,
             String state
     ) {
-        return new StatusTelemetryDto("status", robotId, occurredAt, new StatusTelemetryDataDto(state));
+        return new StatusTelemetryDto("status", robotId, occurredAt, null, new StatusTelemetryDataDto(state));
     }
 }

@@ -12,10 +12,11 @@ public record RobotStatusDto(
         OffsetDateTime lastSeen,
         @Schema(nullable = true) PoseDto pose,
         @Schema(nullable = true) BatteryDto battery,
-        String state
+        String state,
+        String runtimeId
 ) {
     public static RobotStatusDto of(String robotId, boolean online, OffsetDateTime lastSeen,
                                     PoseDto pose, BatteryDto battery, String state) {
-        return new RobotStatusDto(robotId, online, lastSeen, pose, battery, state);
+        return new RobotStatusDto(robotId, online, lastSeen, pose, battery, state, null);
     }
 }

@@ -91,3 +91,40 @@ class FleetCommandRouter:
                 if not valid:
                     raise CommandRejected('move_to requires finite numeric x and y')
         self.publish(command)
+
+
+class ManagedFleetCommandRouter(FleetCommandRouter):
+    """단일 관리 런타임의 동적 명세와 실행 인스턴스를 검증한다."""
+
+    def __init__(self, fleet_id, publish, runtime_id):
+        import threading
+        super().__init__(fleet_id, ['managed_placeholder'], publish)
+        self.runtime_id = runtime_id
+        self.ownership_lock = threading.RLock()
+        self.versions = {}
+        self.robot_ids = self.fleet_robot_ids = frozenset()
+
+    def consumer_group(self, prefix):
+        super().consumer_group(prefix)
+        return f'{prefix}.{self.fleet_id}.managed.v1'
+
+    def add(self, robot_id, version):
+        with self.ownership_lock:
+            self.versions[robot_id] = version
+            self.robot_ids = self.fleet_robot_ids = frozenset(self.versions)
+
+    def remove(self, robot_id):
+        with self.ownership_lock:
+            self.versions.pop(robot_id, None)
+            self.robot_ids = self.fleet_robot_ids = frozenset(self.versions)
+
+    def dispatch(self, command):
+        with self.ownership_lock:
+            if isinstance(command, dict) and command.get('fleet_id') == self.fleet_id:
+                rid = command.get('robot_id')
+                version = self.versions.get(rid) if isinstance(rid, str) else None
+                if (version is None or isinstance(command.get('simulation_version'), bool)
+                        or command.get('simulation_version') != version
+                        or command.get('simulation_runtime_id') != self.runtime_id):
+                    raise CommandRejected('Simulation is absent, stale, or belongs to a previous runtime')
+            super().dispatch(command)

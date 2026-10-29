@@ -31,8 +31,9 @@ public class RobotController {
     @GetMapping("/{robotId}/pose/history")
     public List<PoseDto> getPoseHistory(
             @PathVariable String robotId,
-            @RequestParam(defaultValue = "100") int limit) {
-        return queryService.getPoseHistory(robotId, limit);
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(required = false) String runtimeId) {
+        return queryService.getPoseHistory(robotId, limit, runtimeId);
     }
 
     @GetMapping("/{robotId}/battery/latest")
@@ -44,7 +45,8 @@ public class RobotController {
     @GetMapping("/{robotId}/battery/history")
     public List<BatteryDto> getBatteryHistory(
             @PathVariable String robotId,
-            @RequestParam(defaultValue = "100") int limit) {
-        return queryService.getBatteryHistory(robotId, limit);
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(required = false) String runtimeId) {
+        return queryService.getBatteryHistory(robotId, limit, runtimeId);
     }
 }

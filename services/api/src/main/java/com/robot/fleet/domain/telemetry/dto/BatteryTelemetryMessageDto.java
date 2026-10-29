@@ -13,6 +13,7 @@ public record BatteryTelemetryMessageDto(
         String robotId,
         @JsonProperty("timestamp")
         OffsetDateTime occurredAt,
+        @JsonProperty("simulation_runtime_id") String runtimeId,
         BatteryTelemetryDataDto data
 ) {
 }

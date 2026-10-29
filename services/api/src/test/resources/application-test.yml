@@ -12,5 +12,9 @@ spring:
   flyway:
     enabled: false
 
+  sql:
+    init:
+      schema-locations: classpath:db/migration/V4__add_simulation_registry.sql,classpath:simulation-runtime-test.sql
+
   kafka:
     bootstrap-servers: localhost:9092

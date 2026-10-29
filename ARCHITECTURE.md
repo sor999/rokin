@@ -60,3 +60,10 @@ API/Flyway 마이그레이션을 먼저 적용해야 합니다. Compose는 API�
 
 빠른 실행은 루트 [README](README.md), 검증 단계는
 [검증 컨벤션](docs/conventions/verification.md)을 사용합니다.
+
+## 동적 시뮬레이터 관리
+
+Dashboard의 등록·삭제는 API의 DB 실행 의도를 변경한다. ROS 관리 런타임이 이를 조회해
+로봇과 Bridge 연결을 수렴시킨다. 정적 모드와의 소유권 구분 및 재시작 계약은
+[ADR 0004](docs/decisions/0004-managed-simulations.md), 실행 설정과 검증 시나리오는
+[가상 로봇 관리](docs/features/simulator-management.md)를 따른다.

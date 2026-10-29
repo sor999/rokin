@@ -21,21 +21,26 @@ public class CommandService {
     private final ObjectMapper objectMapper;
 
     private final String fleetId;
+    private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
 
     public CommandService(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper,
-                          @Value("${fleet.id:default}") String fleetId) {
+                          @Value("${fleet.id:default}") String fleetId,
+                          com.robot.fleet.domain.simulation.service.SimulationService simulations) {
         if (fleetId == null || !fleetId.matches("[A-Za-z0-9_-]{1,128}")) {
             throw new IllegalArgumentException("Invalid fleet.id");
         }
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.fleetId = fleetId;
+        this.simulations = simulations;
     }
 
     public String sendCommand(CommandRequestDto request) {
+        Map<String, Object> context = simulations.commandContext(request.getRobotId());
         String cmdId = UUID.randomUUID().toString();
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
+            payload.putAll(context);
             payload.put("cmd_id", cmdId);
             payload.put("fleet_id", fleetId);
             payload.put("timestamp", OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));

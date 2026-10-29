@@ -28,6 +28,9 @@ public class TelemetryPose extends BaseTimeEntity {
     @Column(name = "robot_id", nullable = false)
     private String robotId;
 
+    @Column(name = "simulation_runtime_id", length = 36)
+    private String simulationRuntimeId;
+
     private Double x;
     private Double y;
 

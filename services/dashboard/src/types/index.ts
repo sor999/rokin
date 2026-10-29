@@ -12,9 +12,10 @@ export interface BatteryDto {
 }
 
 export interface RobotStatusDto {
+  runtimeId?: string | null;
   robotId: string;
   online: boolean;
-  lastSeen: string;
+  lastSeen: string | null;
   pose: PoseDto | null;
   battery: BatteryDto | null;
   state: string;
@@ -22,6 +23,7 @@ export interface RobotStatusDto {
 
 // SSE 이벤트 페이로드
 export interface TelemetryEvent {
+  runtimeId?: string | null;
   type: "pose" | "battery" | "status" | "offline";
   robotId: string;
   timestamp: string;
@@ -65,11 +67,33 @@ export interface AckDto {
 
 // 클라이언트 전역 상태
 export interface RobotState {
+  runtimeId: string | null;
   robotId: string;
   online: boolean;
-  lastSeen: string;
+  lastSeen: string | null;
   pose: PoseDto | null;
   battery: BatteryDto | null;
   state: string;
   trail: { x: number; y: number }[];
+}
+
+export interface Simulation {
+  robotId: string;
+  fleetId: string;
+  startX: number;
+  startY: number;
+  speed: number;
+  desiredState: "RUNNING" | "DELETED";
+  version: number;
+  state: "STARTING" | "RUNNING" | "FAILED" | "DELETING" | "DELETED";
+  error: string | null;
+  runtimeId: string | null;
+  reportedAt: string | null;
+}
+
+export interface CreateSimulation {
+  robotId: string;
+  startX: number;
+  startY: number;
+  speed: number;
 }

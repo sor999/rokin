@@ -12,6 +12,7 @@ import (
 // Row 타입 정의
 
 type PoseRow struct {
+	RuntimeID string
 	EventID   string
 	Timestamp time.Time
 	RobotID   string
@@ -20,6 +21,7 @@ type PoseRow struct {
 }
 
 type BatteryRow struct {
+	RuntimeID string
 	EventID   string
 	Timestamp time.Time
 	RobotID   string
@@ -27,6 +29,7 @@ type BatteryRow struct {
 }
 
 type StatusRow struct {
+	RuntimeID string
 	EventID   string
 	Timestamp time.Time
 	RobotID   string
@@ -58,10 +61,10 @@ func (r *Repository) BatchInsertPose(ctx context.Context, rows []PoseRow) error 
 	batch := &pgx.Batch{}
 	for _, row := range rows {
 		batch.Queue(
-			`INSERT INTO telemetry_pose (event_id, timestamp, robot_id, x, y)
-			 VALUES ($1, $2, $3, $4, $5)
+			`INSERT INTO telemetry_pose (event_id, timestamp, robot_id, x, y, simulation_runtime_id)
+			 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
 			 ON CONFLICT (event_id) DO NOTHING`,
-			row.EventID, row.Timestamp, row.RobotID, row.X, row.Y,
+			row.EventID, row.Timestamp, row.RobotID, row.X, row.Y, row.RuntimeID,
 		)
 	}
 	return r.sendBatch(ctx, batch, len(rows))
@@ -75,10 +78,10 @@ func (r *Repository) BatchInsertBattery(ctx context.Context, rows []BatteryRow) 
 	batch := &pgx.Batch{}
 	for _, row := range rows {
 		batch.Queue(
-			`INSERT INTO telemetry_battery (event_id, timestamp, robot_id, level)
-			 VALUES ($1, $2, $3, $4)
+			`INSERT INTO telemetry_battery (event_id, timestamp, robot_id, level, simulation_runtime_id)
+			 VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 			 ON CONFLICT (event_id) DO NOTHING`,
-			row.EventID, row.Timestamp, row.RobotID, row.Level,
+			row.EventID, row.Timestamp, row.RobotID, row.Level, row.RuntimeID,
 		)
 	}
 	return r.sendBatch(ctx, batch, len(rows))
@@ -92,10 +95,10 @@ func (r *Repository) BatchInsertStatus(ctx context.Context, rows []StatusRow) er
 	batch := &pgx.Batch{}
 	for _, row := range rows {
 		batch.Queue(
-			`INSERT INTO telemetry_status (event_id, timestamp, robot_id, state)
-			 VALUES ($1, $2, $3, $4)
+			`INSERT INTO telemetry_status (event_id, timestamp, robot_id, state, simulation_runtime_id)
+			 VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 			 ON CONFLICT (event_id) DO NOTHING`,
-			row.EventID, row.Timestamp, row.RobotID, row.State,
+			row.EventID, row.Timestamp, row.RobotID, row.State, row.RuntimeID,
 		)
 	}
 	return r.sendBatch(ctx, batch, len(rows))
