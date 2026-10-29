@@ -20,5 +20,7 @@ public sealed interface TelemetryEvent permits
     @JsonProperty("timestamp")
     OffsetDateTime occurredAt();
 
+    String runtimeId();
+
     TelemetryEventData data();
 }

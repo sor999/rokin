@@ -12,6 +12,7 @@ export interface BatteryDto {
 }
 
 export interface RobotStatusDto {
+  runtimeId?: string | null;
   robotId: string;
   online: boolean;
   lastSeen: string | null;
@@ -22,6 +23,7 @@ export interface RobotStatusDto {
 
 // SSE 이벤트 페이로드
 export interface TelemetryEvent {
+  runtimeId?: string | null;
   type: "pose" | "battery" | "status" | "offline";
   robotId: string;
   timestamp: string;

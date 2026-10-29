@@ -21,13 +21,14 @@ import static org.mockito.BDDMockito.given;
 
 @DataJpaTest
 @org.springframework.test.context.ActiveProfiles("test")
-@Import({SimulationRepository.class, SimulationService.class})
+@Import({SimulationRepository.class, SimulationService.class, com.robot.fleet.domain.robot.service.RobotQueryService.class})
 @TestPropertySource(properties = {
-        "spring.sql.init.schema-locations=classpath:db/migration/V4__add_simulation_registry.sql",
+        "spring.sql.init.schema-locations=classpath:db/migration/V4__add_simulation_registry.sql,classpath:simulation-runtime-test.sql",
         "simulation.max-robots=3"})
 class SimulationServiceTest {
     @Autowired SimulationService service;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.robot.fleet.domain.robot.service.RobotQueryService queries;
     @MockBean OfflineDetectorService offline;
     private static final String RUNTIME = UUID.randomUUID().toString();
 
@@ -35,6 +36,8 @@ class SimulationServiceTest {
     void prepare() {
         jdbc.execute("CREATE TABLE IF NOT EXISTS telemetry_pose(robot_id VARCHAR(64))");
         jdbc.update("DELETE FROM simulation_robot");
+        jdbc.update("DELETE FROM simulation_runtime_session");
+        service.registerRuntime(RUNTIME);
     }
 
     private CreateSimulationRequest request(String id) {
@@ -87,9 +90,9 @@ class SimulationServiceTest {
         service.create(request("robot"));
         assertThatThrownBy(() -> service.commandContext("robot")).isInstanceOf(ResponseStatusException.class);
         service.report(new SimulationReport("robot", 1, "RUNNING", null, RUNTIME));
-        given(offline.isOffline("robot")).willReturn(true);
+        given(offline.isOffline("robot", RUNTIME)).willReturn(true);
         assertThatThrownBy(() -> service.commandContext("robot")).isInstanceOf(ResponseStatusException.class);
-        given(offline.isOffline("robot")).willReturn(false);
+        given(offline.isOffline("robot", RUNTIME)).willReturn(false);
         // when
         var context = service.commandContext("robot");
         // then
@@ -122,4 +125,67 @@ class SimulationServiceTest {
         assertThat(service.list().stream().filter(r -> r.robotId().equals("robot_1")).findFirst().orElseThrow()
                 .desiredState()).isEqualTo("DELETED");
     }
+    @Test @DisplayName("이전 실행의 지연 보고와 재등록은 새 실행 인스턴스를 덮어쓰지 않는다")
+    void report_FencesRetiredRuntime() {
+        // given
+        service.create(request("robot"));
+        service.report(new SimulationReport("robot", 1, "RUNNING", null, RUNTIME));
+        String next = UUID.randomUUID().toString();
+        service.registerRuntime(next);
+        assertThat(service.list().getFirst().state()).isEqualTo("STARTING");
+        // when
+        service.report(new SimulationReport("robot", 1, "RUNNING", null, next));
+        service.report(new SimulationReport("robot", 1, "FAILED", "old", RUNTIME));
+        // then
+        assertThat(service.list().getFirst().runtimeId()).isEqualTo(next);
+        assertThat(service.list().getFirst().state()).isEqualTo("RUNNING");
+        assertThatThrownBy(() -> service.registerRuntime(RUNTIME)).isInstanceOf(ResponseStatusException.class);
+        service.registerRuntime(next);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM simulation_runtime_session", Integer.class)).isEqualTo(2);
+    }
+
+    @Test @DisplayName("pose 없이 배터리·상태·Ack만 남은 ID도 재사용할 수 없다")
+    void create_RejectsIdsWithAnyHistory() {
+        // given
+        jdbc.update("INSERT INTO telemetry_battery(event_id,timestamp,robot_id,level,created_at,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), "battery_only", 90);
+        jdbc.update("INSERT INTO telemetry_status(event_id,timestamp,robot_id,state,created_at,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), "status_only", "idle");
+        jdbc.update("INSERT INTO robot_ack(cmd_id,timestamp,robot_id,status,created_at,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), "ack_only", "done");
+        // when, then
+        for (String id : java.util.List.of("battery_only", "status_only", "ack_only")) {
+            assertThatThrownBy(() -> service.create(request(id))).isInstanceOf(ResponseStatusException.class);
+        }
+    }
+
+    @Test @DisplayName("안전한 시작 좌표 경계는 허용하고 정밀도를 잃는 큰 좌표는 거부한다")
+    void create_BoundsStartingCoordinates() {
+        // given
+        var boundary = new CreateSimulationRequest("edge", -1000000.0, 1000000.0, 1.0);
+        // when, then
+        assertThat(service.create(boundary).startX()).isEqualTo(-1000000.0);
+        assertThatThrownBy(() -> service.create(new CreateSimulationRequest("large", 1e16, 0.0, 1.0)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test @DisplayName("REST 목록은 현재 실행의 pose만 조회하고 이전 실행의 배터리·상태를 섞지 않는다")
+    void getAllRobots_FiltersSourceRuntime() {
+        // given
+        service.create(request("robot"));
+        service.report(new SimulationReport("robot", 1, "RUNNING", null, RUNTIME));
+        jdbc.update("INSERT INTO telemetry_pose(event_id,timestamp,robot_id,x,y,simulation_runtime_id,created_at,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), "robot", 99, 99, "old-runtime");
+        jdbc.update("INSERT INTO telemetry_pose(event_id,timestamp,robot_id,x,y,simulation_runtime_id,created_at,updated_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now().minusSeconds(1), "robot", 1, 2, RUNTIME);
+        jdbc.update("INSERT INTO telemetry_battery(event_id,timestamp,robot_id,level,simulation_runtime_id,created_at,updated_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+                UUID.randomUUID(), OffsetDateTime.now(), "robot", 40, "old-runtime");
+        // when
+        var dto = queries.getAllRobots().getFirst();
+        // then
+        assertThat(dto.runtimeId()).isEqualTo(RUNTIME);
+        assertThat(dto.pose().x()).isEqualTo(1);
+        assertThat(dto.battery()).isNull();
+    }
+
 }

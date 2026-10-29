@@ -54,8 +54,12 @@ class SimulationManager(Node):
             return json.loads(response.read()) if body is None else None
 
     def sync(self):
+        registered = False
         while not self.stop_event.is_set():
             try:
+                if not registered:
+                    self.request('/internal/simulations/runtime', {'runtimeId': self.runtime_id})
+                    registered = True
                 snapshot = self.request('/internal/simulations')
                 if snapshot['fleetId'] != self.fleet_id:
                     raise ValueError('Fleet configuration mismatch')

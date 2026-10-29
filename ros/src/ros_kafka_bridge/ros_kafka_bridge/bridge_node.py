@@ -47,6 +47,7 @@ class RosKafkaBridgeNode(Node):
                 ownership_generation=self.get_parameter('ownership_generation').value,
             )
 
+        self._runtime_id = runtime_id if managed else None
         self._producer = KafkaTelemetryProducer(broker)
         self._cmd_publishers = {}
         self._subscriptions_by_robot = {}
@@ -108,13 +109,16 @@ class RosKafkaBridgeNode(Node):
 
     def _make_envelope(self, robot_id: str, msg_type: str, data: dict) -> dict:
         """공통 Telemetry Envelope를 생성한다."""
-        return {
+        envelope = {
             'event_id': str(uuid.uuid4()),
             'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'robot_id': robot_id,
             'type': msg_type,
             'data': data,
         }
+        if self._runtime_id is not None:
+            envelope['simulation_runtime_id'] = self._runtime_id
+        return envelope
 
     # ROS → Kafka 콜백
 
@@ -133,6 +137,8 @@ class RosKafkaBridgeNode(Node):
         except json.JSONDecodeError:
             self.get_logger().warning(f"[Bridge] status JSON 파싱 실패 (robot={robot_id})")
             return
+        if self._runtime_id is not None:
+            payload['simulation_runtime_id'] = self._runtime_id
         self._producer.produce('telemetry.status', key=robot_id, value=payload)
 
     def _on_ack(self, robot_id: str, msg: String) -> None:

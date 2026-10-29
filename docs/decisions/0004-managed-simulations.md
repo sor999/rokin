@@ -33,3 +33,19 @@ API와 관리 런타임을 함께 재시작한다. DB 설정 버전은 오래된
 삭제는 비동기로 수렴하므로 접수 전에 발행된 명령이 종료 직전까지 실행될 수 있다. API 접수는
 물리적 정지 보장이 아니다. API·ROS 장애 중 로봇 동작은 기존 로직을 따르며 장애 후 안전 정지는
 별도 과제다. 실행 복구는 시작 위치와 배터리 100%에서 시작하고 진행 중 명령을 재개하지 않는다.
+
+## 재시작 경계 보완
+
+V5의 `simulation_runtime_session`은 등록 순서의 epoch를 보존한다. 관리 런타임은 실행 전
+인증된 `/internal/simulations/runtime`에 UUID를 등록한다. 같은 현재 UUID의 등록은 멱등이며
+한 번 교체된 UUID는 다시 등록할 수 없다. 상태 보고는 현재 등록 UUID와 설정 버전이 모두
+맞는 경우만 반영한다. API 재시작에도 이 판정을 보존한다. 동시 active-active 배치는 지원하지 않는다.
+
+관리 Bridge는 pose/battery/status envelope에 선택 필드 `simulation_runtime_id`를 부여한다.
+Worker는 이를 nullable 컬럼에 보존하고 API는 현재 runtime의 행만 최신 상태에 사용한다.
+SSE의 `runtimeId`, REST 로봇 DTO의 `runtimeId`를 클라이언트의 등록 상태와 비교하여
+이전 실행의 늦은 이벤트·REST 응답을 버린다. 상세 화면의 이력은 runtimeId 쿼리로 현재
+실행에 한정하고, 쿼리를 생략한 기존 이력 API는 과거 실행 데이터도 보존해 제공한다.
+
+전환 시 Flyway V5를 먼저 적용한 뒤 Worker와 관리 ROS 런타임을 함께 갱신한다.
+정적 메시지에서 runtime 필드를 생략하는 기존 경로는 nullable 값으로 호환한다.

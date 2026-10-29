@@ -31,6 +31,10 @@ public class TelemetryStreamService {
     private final DistributionSummary eventLagSeconds;
 
     // 로봇별 마지막 수신 시각 (Offline 탐지용)
+    private final Map<String, String> runtimeIds = new ConcurrentHashMap<>();
+
+    public String getRuntimeId(String robotId) { return runtimeIds.get(robotId); }
+
     private final Map<String, OffsetDateTime> lastSeenMap = new ConcurrentHashMap<>();
 
     public TelemetryStreamService(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
@@ -60,7 +64,14 @@ public class TelemetryStreamService {
     }
 
     public void broadcast(TelemetryEvent event) {
-        lastSeenMap.put(event.robotId(), event.occurredAt());
+        if (!event.type().equals("offline")) {
+            lastSeenMap.compute(event.robotId(), (id, previous) -> {
+                if (previous != null && previous.isAfter(event.occurredAt())) return previous;
+                if (event.runtimeId() == null) runtimeIds.remove(id);
+                else runtimeIds.put(id, event.runtimeId());
+                return event.occurredAt();
+            });
+        }
         broadcastCounter.increment();
         long eventLagMillis = Duration.between(event.occurredAt(), OffsetDateTime.now()).toMillis();
         eventLagSeconds.record(Math.max(eventLagMillis, 0) / 1000.0);

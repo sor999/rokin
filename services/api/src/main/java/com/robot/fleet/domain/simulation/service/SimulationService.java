@@ -67,8 +67,13 @@ public class SimulationService implements ApplicationRunner {
 
     @Transactional(readOnly = true)
     public List<SimulationDto> list() {
+        String current = repository.currentRuntime(fleetId).orElse(null);
         OffsetDateTime threshold = OffsetDateTime.now().minusSeconds(10);
         return repository.findAll(fleetId).stream().map(robot -> {
+            if (robot.desiredState().equals("RUNNING") && current != null && !current.equals(robot.runtimeId())) {
+                return new SimulationDto(robot.robotId(), robot.fleetId(), robot.startX(), robot.startY(), robot.speed(),
+                        robot.desiredState(), robot.version(), "STARTING", "새 실행 인스턴스를 준비 중입니다.", current, null);
+            }
             if (robot.state().equals("RUNNING") && (robot.reportedAt() == null || robot.reportedAt().isBefore(threshold))) {
                 return robot.withState("STARTING", "시뮬레이터 연결을 기다리는 중입니다.");
             }
@@ -83,17 +88,30 @@ public class SimulationService implements ApplicationRunner {
 
     public void report(SimulationReport report) {
         if (report.version() < 1 || report.robotId() == null || report.runtimeId() == null
-                || !report.runtimeId().matches("[a-f0-9-]{36}") || report.state() == null
+                || !report.runtimeId().matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}") || report.state() == null
                 || !List.of("STARTING", "RUNNING", "FAILED", "DELETED").contains(report.state())
                 || (report.error() != null && report.error().length() > 500)) {
             throw new IllegalArgumentException("잘못된 실행 상태 보고입니다.");
         }
         repository.lockRegistry();
+        if (!repository.currentRuntime(fleetId).filter(report.runtimeId()::equals).isPresent()) return;
         SimulationDto robot = get(report.robotId());
         if (robot.version() != report.version()) return;
         if (robot.desiredState().equals("DELETED") != report.state().equals("DELETED")
                 && !report.state().equals("FAILED")) return;
         repository.report(robot.robotId(), report.state(), report.error(), report.runtimeId(), OffsetDateTime.now());
+    }
+
+    public void registerRuntime(String runtimeId) {
+        if (runtimeId == null || !runtimeId.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")) {
+            throw new IllegalArgumentException("잘못된 실행 인스턴스 ID입니다.");
+        }
+        repository.lockRegistry();
+        if (repository.currentRuntime(fleetId).filter(runtimeId::equals).isPresent()) return;
+        if (repository.runtimeUsed(runtimeId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "종료된 실행 인스턴스입니다.");
+        }
+        repository.registerRuntime(fleetId, runtimeId);
     }
 
     @Transactional(readOnly = true)
@@ -106,7 +124,7 @@ public class SimulationService implements ApplicationRunner {
             return Map.of();
         }
         if (!robot.desiredState().equals("RUNNING") || !robot.state().equals("RUNNING")
-                || offlineDetector.isOffline(robotId)) {
+                || offlineDetector.isOffline(robotId, robot.runtimeId())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "실행 준비 및 온라인 상태를 확인하세요.");
         }
         return Map.of("simulation_version", robot.version(), "simulation_runtime_id", robot.runtimeId());

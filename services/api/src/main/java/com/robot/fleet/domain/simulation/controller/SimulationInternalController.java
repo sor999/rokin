@@ -41,6 +41,16 @@ public class SimulationInternalController {
                 .filter(robot -> !robot.state().equals("DELETED")).toList());
     }
 
+    public record RuntimeRegistration(String runtimeId) { }
+
+    @PostMapping("/runtime")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void registerRuntime(@RequestHeader(value = "X-Simulator-Token", required = false) String candidate,
+                                @RequestBody RuntimeRegistration registration) {
+        authenticate(candidate);
+        service.registerRuntime(registration.runtimeId());
+    }
+
     @PostMapping("/reports")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void report(@RequestHeader(value = "X-Simulator-Token", required = false) String candidate,

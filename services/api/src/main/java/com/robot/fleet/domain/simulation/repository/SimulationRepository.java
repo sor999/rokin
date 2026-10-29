@@ -32,8 +32,13 @@ public class SimulationRepository {
     }
 
     public boolean hasTelemetry(String robotId) {
-        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM telemetry_pose WHERE robot_id = ?", Long.class, robotId);
-        return count != null && count > 0;
+        Boolean exists = jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM telemetry_pose WHERE robot_id = ?)
+                    OR EXISTS(SELECT 1 FROM telemetry_battery WHERE robot_id = ?)
+                    OR EXISTS(SELECT 1 FROM telemetry_status WHERE robot_id = ?)
+                    OR EXISTS(SELECT 1 FROM robot_ack WHERE robot_id = ?)
+                """, Boolean.class, robotId, robotId, robotId, robotId);
+        return Boolean.TRUE.equals(exists);
     }
 
     public void insert(String fleetId, String robotId, double x, double y, double speed) {
@@ -57,4 +62,18 @@ public class SimulationRepository {
                 WHERE robot_id = ?
                 """, state, error, runtimeId, now, robotId);
     }
+    public Optional<String> currentRuntime(String fleetId) {
+        return jdbc.query("SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1",
+                (rs, n) -> rs.getString(1), fleetId).stream().findFirst();
+    }
+
+    public boolean runtimeUsed(String runtimeId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM simulation_runtime_session WHERE runtime_id = ?)", Boolean.class, runtimeId));
+    }
+
+    public void registerRuntime(String fleetId, String runtimeId) {
+        jdbc.update("INSERT INTO simulation_runtime_session(runtime_id, fleet_id) VALUES (?, ?)", runtimeId, fleetId);
+    }
+
 }

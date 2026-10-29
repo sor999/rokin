@@ -37,16 +37,23 @@ public class RobotQueryService {
                                 .map(com.robot.fleet.domain.simulation.dto.SimulationDto::robotId))
                 .distinct().filter(id -> !removed.contains(id))
                 .map(robotId -> {
-                    TelemetryPose pose = poseRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId).orElse(null);
-                    TelemetryBattery battery = batteryRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId).orElse(null);
-                    TelemetryStatus status = statusRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId).orElse(null);
-                    return RobotStatusDto.of(
+                    String runtimeId = registered.stream().filter(r -> r.robotId().equals(robotId))
+                            .map(r -> r.runtimeId() == null ? "" : r.runtimeId()).findFirst().orElse("");
+                    boolean pending = runtimeId.isEmpty() && registered.stream().anyMatch(r -> r.robotId().equals(robotId));
+                    TelemetryPose pose = pending ? null : (runtimeId.isEmpty() ? poseRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+                            : poseRepo.findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId)).orElse(null);
+                    TelemetryBattery battery = pending ? null : (runtimeId.isEmpty() ? batteryRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+                            : batteryRepo.findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId)).orElse(null);
+                    TelemetryStatus status = pending ? null : (runtimeId.isEmpty() ? statusRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId)
+                            : statusRepo.findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId)).orElse(null);
+                    return new RobotStatusDto(
                             robotId,
-                            !offlineDetector.isOffline(robotId),
+                            !pending && !offlineDetector.isOffline(robotId, runtimeId.isEmpty() ? null : runtimeId),
                             pose != null ? pose.getOccurredAt() : null,
                             pose != null ? PoseDto.of(pose.getX(), pose.getY(), pose.getOccurredAt()) : null,
                             battery != null ? BatteryDto.of(battery.getLevel(), battery.getOccurredAt()) : null,
-                            status != null ? status.getState() : null
+                            status != null ? status.getState() : null,
+                            runtimeId.isEmpty() ? null : runtimeId
                     );
                 })
                 .toList();
@@ -58,8 +65,9 @@ public class RobotQueryService {
                 .orElse(null);
     }
 
-    public List<PoseDto> getPoseHistory(String robotId, int limit) {
-        return poseRepo.findByRobotIdOrderByOccurredAtDesc(robotId, PageRequest.of(0, limit))
+    public List<PoseDto> getPoseHistory(String robotId, int limit, String runtimeId) {
+        return (runtimeId == null ? poseRepo.findByRobotIdOrderByOccurredAtDesc(robotId, PageRequest.of(0, limit))
+                : poseRepo.findByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId, PageRequest.of(0, limit)))
                 .stream()
                 .map(p -> PoseDto.of(p.getX(), p.getY(), p.getOccurredAt()))
                 .toList();
@@ -71,8 +79,9 @@ public class RobotQueryService {
                 .orElse(null);
     }
 
-    public List<BatteryDto> getBatteryHistory(String robotId, int limit) {
-        return batteryRepo.findByRobotIdOrderByOccurredAtDesc(robotId, PageRequest.of(0, limit))
+    public List<BatteryDto> getBatteryHistory(String robotId, int limit, String runtimeId) {
+        return (runtimeId == null ? batteryRepo.findByRobotIdOrderByOccurredAtDesc(robotId, PageRequest.of(0, limit))
+                : batteryRepo.findByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(robotId, runtimeId, PageRequest.of(0, limit)))
                 .stream()
                 .map(b -> BatteryDto.of(b.getLevel(), b.getOccurredAt()))
                 .toList();

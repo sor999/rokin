@@ -13,6 +13,7 @@ public record StatusTelemetryMessageDto(
         String robotId,
         @JsonProperty("timestamp")
         OffsetDateTime occurredAt,
+        @JsonProperty("simulation_runtime_id") String runtimeId,
         StatusTelemetryDataDto data
 ) {
 }

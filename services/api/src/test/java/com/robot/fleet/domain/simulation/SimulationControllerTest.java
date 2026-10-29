@@ -27,9 +27,17 @@ class SimulationControllerTest {
     void publicApi_ReturnsAccepted() throws Exception {
         // given
         String body = "{\"robotId\":\"robot_4\",\"startX\":0,\"startY\":0,\"speed\":1}";
+        var dto = new com.robot.fleet.domain.simulation.dto.SimulationDto(
+                "robot_4", "default", 0, 0, 1, "RUNNING", 1, "STARTING", null, null, null);
+        when(service.create(any())).thenReturn(dto);
+        when(service.delete("robot_4")).thenReturn(new com.robot.fleet.domain.simulation.dto.SimulationDto(
+                "robot_4", "default", 0, 0, 1, "DELETED", 2, "DELETING", null, null, null));
         // when, then
-        mvc.perform(post("/api/simulations").contentType("application/json").content(body)).andExpect(status().isAccepted());
-        mvc.perform(delete("/api/simulations/robot_4")).andExpect(status().isAccepted());
+        mvc.perform(post("/api/simulations").contentType("application/json").content(body)).andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.robotId").value("robot_4")).andExpect(jsonPath("$.version").value(1));
+        mvc.perform(delete("/api/simulations/robot_4")).andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.robotId").value("robot_4"))
+                .andExpect(jsonPath("$.version").value(2)).andExpect(jsonPath("$.desiredState").value("DELETED"));
         mvc.perform(post("/api/simulations").contentType("application/json").content("{")).andExpect(status().isBadRequest());
     }
 
@@ -46,4 +54,16 @@ class SimulationControllerTest {
         mvc.perform(get("/internal/simulations").header("X-Simulator-Token", "test-only-token"))
                 .andExpect(status().isOk());
     }
+    @Test @DisplayName("인증된 실행 상태 보고는 204로 수락하고 서비스에 내용을 전달한다")
+    void internalReport_DelegatesToService() throws Exception {
+        // given
+        String runtime = "00000000-0000-0000-0000-000000000001";
+        String body = "[{\"robotId\":\"robot_4\",\"version\":1,\"state\":\"RUNNING\",\"runtimeId\":\"" + runtime + "\"}]";
+        // when
+        mvc.perform(post("/internal/simulations/reports").header("X-Simulator-Token", "test-only-token")
+                .contentType("application/json").content(body)).andExpect(status().isNoContent());
+        // then
+        verify(service).report(new com.robot.fleet.domain.simulation.dto.SimulationReport("robot_4", 1, "RUNNING", null, runtime));
+    }
+
 }

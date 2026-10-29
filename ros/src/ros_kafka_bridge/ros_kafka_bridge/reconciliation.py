@@ -29,6 +29,8 @@ class SimulationReconciler:
             for key in ('startX', 'startY', 'speed'):
                 if type(robot.get(key)) not in (int, float) or not math.isfinite(robot[key]):
                     raise ValueError('Invalid simulation configuration')
+            if abs(robot['startX']) > 1000000 or abs(robot['startY']) > 1000000:
+                raise ValueError('Starting coordinate exceeds simulation bounds')
             if not 0 < robot['speed'] <= 10:
                 raise ValueError('Invalid simulation speed')
 

@@ -23,7 +23,7 @@ interface FleetStore {
   initFromRest: (list: RobotStatusDto[]) => void;
 
   /** REST pose history 결과를 궤적 초기값으로 반영 (SSE append 와 공존) */
-  initTrail: (robotId: string, points: { x: number; y: number }[]) => void;
+  initTrail: (robotId: string, points: { x: number; y: number }[], runtimeId?: string | null) => void;
 
   /** SSE robot_update 이벤트 반영 */
   upsertFromSSE: (event: TelemetryEvent) => void;
@@ -79,6 +79,8 @@ export const useFleetStore = create<FleetStore>((set) => ({
     const robots = { ...prev.robots };
     for (const dto of list) {
       if (prev.simulations && prev.simulations[dto.robotId]?.desiredState !== "RUNNING") continue;
+      const runtimeId = prev.simulations?.[dto.robotId]?.runtimeId;
+      if (runtimeId && dto.runtimeId !== runtimeId) continue;
       const existing = robots[dto.robotId];
       if (existing?.lastSeen && (!dto.lastSeen || existing.lastSeen >= dto.lastSeen)) continue;
       robots[dto.robotId] = {
@@ -89,9 +91,10 @@ export const useFleetStore = create<FleetStore>((set) => ({
     return { robots };
   }),
 
-  initTrail: (robotId, points) =>
+  initTrail: (robotId, points, runtimeId) =>
     set((prev) => {
       if (prev.simulations && prev.simulations[robotId]?.desiredState !== "RUNNING") return {};
+      if (runtimeId !== undefined && prev.simulations?.[robotId]?.runtimeId !== runtimeId) return {};
       const existing = prev.robots[robotId] ?? emptyRobot(robotId);
       // REST 이력 + SSE로 누적된 최근 trail 병합 (최대 MAX_TRAIL)
       const merged = [...points, ...existing.trail];
@@ -105,6 +108,8 @@ export const useFleetStore = create<FleetStore>((set) => ({
   upsertFromSSE: (event) =>
     set((prev) => {
       if (prev.simulations && prev.simulations[event.robotId]?.desiredState !== "RUNNING") return {};
+      const runtimeId = prev.simulations?.[event.robotId]?.runtimeId;
+      if (runtimeId && event.runtimeId !== runtimeId) return {};
       const existing = prev.robots[event.robotId] ?? emptyRobot(event.robotId);
       const updated = { ...existing, lastSeen: event.timestamp };
 

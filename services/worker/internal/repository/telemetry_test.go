@@ -47,7 +47,7 @@ func testDatabase(t *testing.T, version int) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	migrations := []string{"V1__create_telemetry_tables.sql", "V2__add_updated_at_columns.sql", "V3__add_ack_transition_state.sql"}
+	migrations := []string{"V1__create_telemetry_tables.sql", "V2__add_updated_at_columns.sql", "V3__add_ack_transition_state.sql", "V4__add_simulation_registry.sql", "V5__fence_simulation_runtimes.sql"}
 	for _, migration := range migrations[:version] {
 		contents, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "src", "main", "resources", "db", "migration", migration))
 		if err != nil {
@@ -67,7 +67,7 @@ func ack(cmd, status string, seconds int) AckRow {
 func TestAckTransitions(t *testing.T) {
 	for _, terminal := range []string{"done", "failed"} {
 		t.Run(terminal, func(t *testing.T) {
-			pool := testDatabase(t, 3)
+			pool := testDatabase(t, 5)
 			ctx := context.Background()
 			if err := CheckSchema(ctx, pool); err != nil {
 				t.Fatal(err)
@@ -249,5 +249,49 @@ func TestLegacyHistoryBackfillSuppressesReplays(t *testing.T) {
 				t.Fatalf("state = %s", state)
 			}
 		})
+	}
+}
+
+func TestTelemetryPreservesRuntimeAndIdempotency(t *testing.T) {
+	pool := testDatabase(t, 5)
+	ctx := context.Background()
+	repo := New(pool)
+	now := time.Now().UTC()
+	runtimeID := "00000000-0000-0000-0000-000000000099"
+	poseID := "00000000-0000-0000-0000-000000000011"
+	if err := repo.BatchInsertPose(ctx, []PoseRow{{EventID: poseID, Timestamp: now, RobotID: "runtime_robot", RuntimeID: runtimeID, X: 1, Y: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BatchInsertBattery(ctx, []BatteryRow{{EventID: "00000000-0000-0000-0000-000000000012", Timestamp: now, RobotID: "runtime_robot", RuntimeID: runtimeID, Level: 100}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BatchInsertStatus(ctx, []StatusRow{{EventID: "00000000-0000-0000-0000-000000000013", Timestamp: now, RobotID: "runtime_robot", RuntimeID: runtimeID, State: "idle"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BatchInsertPose(ctx, []PoseRow{{EventID: poseID, Timestamp: now, RobotID: "runtime_robot", RuntimeID: "old", X: 9}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"telemetry_pose", "telemetry_battery", "telemetry_status"} {
+		var actual string
+		if err := pool.QueryRow(ctx, "SELECT simulation_runtime_id FROM "+table+" WHERE robot_id='runtime_robot'").Scan(&actual); err != nil {
+			t.Fatal(err)
+		}
+		if actual != runtimeID {
+			t.Fatalf("%s runtime=%q", table, actual)
+		}
+	}
+	if err := repo.BatchInsertPose(ctx, []PoseRow{{EventID: "00000000-0000-0000-0000-000000000014", Timestamp: now, RobotID: "static_robot"}}); err != nil {
+		t.Fatal(err)
+	}
+	var empty bool
+	if err := pool.QueryRow(ctx, "SELECT simulation_runtime_id IS NULL FROM telemetry_pose WHERE robot_id='static_robot'").Scan(&empty); err != nil || !empty {
+		t.Fatalf("static compatibility: null=%t err=%v", empty, err)
+	}
+}
+
+func TestCheckSchemaRequiresRuntimeMigration(t *testing.T) {
+	pool := testDatabase(t, 4)
+	if err := CheckSchema(context.Background(), pool); err == nil {
+		t.Fatal("expected missing V5 runtime columns")
 	}
 }

@@ -35,6 +35,9 @@ class ManagedRosIntegrationTest(unittest.TestCase):
                 body = json.dumps({'fleetId': fleet, 'simulations': snapshot}).encode()
                 self.send_response(200); self.end_headers(); self.wfile.write(body)
             def do_POST(self):
+                if self.path == '/internal/simulations/runtime':
+                    self.rfile.read(int(self.headers['Content-Length']))
+                    self.send_response(204); self.end_headers(); return
                 for report in json.loads(self.rfile.read(int(self.headers['Content-Length']))):
                     reports[report['robotId']] = report
                 self.send_response(204); self.end_headers()
@@ -107,7 +110,7 @@ class ManagedHttpBatchTest(unittest.TestCase):
         runtime.stop_event.is_set.side_effect = [False, True]
         runtime.request = Mock(return_value={'fleetId': 'default', 'simulations': []})
         SimulationManager.sync(runtime)
-        batches = [call.args[1] for call in runtime.request.call_args_list if len(call.args) == 2]
+        batches = [call.args[1] for call in runtime.request.call_args_list if call.args[0] == '/internal/simulations/reports']
         self.assertEqual([100, 100, 1], [len(batch) for batch in batches])
         self.assertEqual(201, sum(len(batch) for batch in batches))
         self.assertTrue(all(report['runtimeId'] == 'current-runtime' for batch in batches for report in batch))

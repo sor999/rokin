@@ -70,3 +70,7 @@ Fleet 전체 명세에도 없는 로봇은 `dlq.command`에 원본과 원인을 
 ROS 관리 런타임은 현재 등록 버전 및 프로세스 인스턴스가 맞는 명령만 처리한다.
 삭제 및 재시작 이전 명령은 DLQ 대상이며 정적 Bridge의 기존 계약은 유지한다.
 등록·삭제·복구 및 단일 런타임 제약은 [ADR 0004](../decisions/0004-managed-simulations.md)를 따른다.
+
+관리 pose/battery/status envelope의 선택 필드 `simulation_runtime_id`는 Worker가 보존하고
+API가 SSE/REST의 `runtimeId`로 전달한다. 현재 등록 인스턴스와 다른 데이터는 현재 상태에
+합성하지 않는다. 정적 로봇은 이 필드를 생략할 수 있고 과거 이력은 삭제하지 않는다.

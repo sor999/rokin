@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { createSimulation, deleteSimulation } from "@/services/api";
 import { useFleetStore } from "@/store/fleetStore";
+import { validateSimulation } from "@/lib/simulationValidation";
 import type { Simulation } from "@/types";
 
 const labels: Record<Simulation["state"], string> = {
@@ -24,10 +25,13 @@ export function AddSimulation() {
     event.preventDefault();
     const form = event.currentTarget;
     const values = new FormData(form);
+    const input = { robotId: String(values.get("robotId")), startX: Number(values.get("startX")),
+      startY: Number(values.get("startY")), speed: Number(values.get("speed")) };
+    const validationError = validateSimulation(input);
+    if (validationError) { setError(validationError); return; }
     setPending(true); setError(null);
     try {
-      const created = await createSimulation({ robotId: String(values.get("robotId")),
-        startX: Number(values.get("startX")), startY: Number(values.get("startY")), speed: Number(values.get("speed")) });
+      const created = await createSimulation(input);
       useFleetStore.getState().syncSimulations([created]);
       form.reset(); setOpen(false);
     } catch (error) {
@@ -48,10 +52,10 @@ export function AddSimulation() {
             <Input id="robotId" name="robotId" required pattern="[A-Za-z][A-Za-z0-9_]{0,63}" maxLength={64} placeholder="robot_4" />
           </div>
           <div className="space-y-2"><Label htmlFor="startX">시작 X (m)</Label>
-            <Input id="startX" name="startX" type="number" step="any" defaultValue="0" required />
+            <Input id="startX" name="startX" type="number" step="any" min="-1000000" max="1000000" defaultValue="0" required />
           </div>
           <div className="space-y-2"><Label htmlFor="startY">시작 Y (m)</Label>
-            <Input id="startY" name="startY" type="number" step="any" defaultValue="0" required />
+            <Input id="startY" name="startY" type="number" step="any" min="-1000000" max="1000000" defaultValue="0" required />
           </div>
           <div className="space-y-2"><Label htmlFor="speed">속도 (m/s)</Label>
             <Input id="speed" name="speed" type="number" step="any" min="0" max="10" defaultValue="1" required />

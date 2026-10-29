@@ -13,6 +13,7 @@ public record PoseTelemetryMessageDto(
         String robotId,
         @JsonProperty("timestamp")
         OffsetDateTime occurredAt,
+        @JsonProperty("simulation_runtime_id") String runtimeId,
         PoseTelemetryDataDto data
 ) {
 }

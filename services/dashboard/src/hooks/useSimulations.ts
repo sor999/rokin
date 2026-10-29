@@ -11,7 +11,7 @@ export function useSimulations() {
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
       try {
-        const list = await fetchSimulations(controller.signal);
+        const list = await fetchSimulations(AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]));
         if (controller.signal.aborted) return;
         useFleetStore.getState().syncSimulations(list);
         useFleetStore.getState().setSimulationError(null);

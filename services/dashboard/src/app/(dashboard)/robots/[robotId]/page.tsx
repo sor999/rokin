@@ -29,15 +29,22 @@ export default function RobotDetailPage({
 
   // 배터리 이력 로딩
   useEffect(() => {
-    fetchBatteryHistory(robotId, 50)
-      .then(setBatteryHistory)
+    const runtimeId = simulation?.runtimeId;
+    setBatteryHistory([]);
+    if (!runtimeId) return;
+    fetchBatteryHistory(robotId, 50, runtimeId)
+      .then((history) => {
+        if (useFleetStore.getState().simulations?.[robotId]?.runtimeId === runtimeId) setBatteryHistory(history);
+      })
       .catch(() => {});
-  }, [robotId]);
+  }, [robotId, simulation?.runtimeId]);
 
   // 포즈 히스토리 로딩 → 궤적 초기화 (과거 → 최신 순으로 정렬)
   const initTrail = useFleetStore((s) => s.initTrail);
   useEffect(() => {
-    fetchPoseHistory(robotId, 200)
+    const runtimeId = simulation?.runtimeId;
+    if (!runtimeId) return;
+    fetchPoseHistory(robotId, 200, runtimeId)
       .then((history) => {
         const points = [...history]
           .sort(
@@ -46,10 +53,10 @@ export default function RobotDetailPage({
               new Date(b.timestamp).getTime()
           )
           .map((p) => ({ x: p.x, y: p.y }));
-        initTrail(robotId, points);
+        initTrail(robotId, points, runtimeId);
       })
       .catch(() => {});
-  }, [robotId, initTrail]);
+  }, [robotId, initTrail, simulation?.runtimeId]);
 
   if (!robot) {
     return (

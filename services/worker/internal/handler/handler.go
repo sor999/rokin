@@ -16,6 +16,7 @@ import (
 // 공통 Telemetry Envelope 구조체
 
 type telemetryEnvelope struct {
+	RuntimeID string          `json:"simulation_runtime_id"`
 	EventID   string          `json:"event_id"`
 	Timestamp string          `json:"timestamp"`
 	RobotID   string          `json:"robot_id"`
@@ -506,6 +507,7 @@ func parsePose(payload []byte) (repository.PoseRow, error) {
 		EventID:   env.EventID,
 		Timestamp: ts,
 		RobotID:   env.RobotID,
+		RuntimeID: env.RuntimeID,
 		X:         data.X,
 		Y:         data.Y,
 	}, nil
@@ -530,6 +532,7 @@ func parseBattery(payload []byte) (repository.BatteryRow, error) {
 		EventID:   env.EventID,
 		Timestamp: ts,
 		RobotID:   env.RobotID,
+		RuntimeID: env.RuntimeID,
 		Level:     data.Level,
 	}, nil
 }
@@ -553,6 +556,7 @@ func parseStatus(payload []byte) (repository.StatusRow, error) {
 		EventID:   env.EventID,
 		Timestamp: ts,
 		RobotID:   env.RobotID,
+		RuntimeID: env.RuntimeID,
 		State:     data.State,
 	}, nil
 }

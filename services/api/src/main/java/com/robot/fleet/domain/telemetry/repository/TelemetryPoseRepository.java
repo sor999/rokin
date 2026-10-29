@@ -10,6 +10,8 @@ import java.util.Optional;
 
 public interface TelemetryPoseRepository extends JpaRepository<TelemetryPose, Long> {
     Optional<TelemetryPose> findTopByRobotIdOrderByOccurredAtDesc(String robotId);
+    Optional<TelemetryPose> findTopByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(String robotId, String runtimeId);
+    List<TelemetryPose> findByRobotIdAndSimulationRuntimeIdOrderByOccurredAtDesc(String robotId, String runtimeId, Pageable pageable);
     List<TelemetryPose> findByRobotIdOrderByOccurredAtDesc(String robotId, Pageable pageable);
 
     @Query("SELECT DISTINCT p.robotId FROM TelemetryPose p")

@@ -50,8 +50,21 @@ test('다른 로봇 추가·목록 조회가 기존 위치와 궤적을 초기�
 test('재시작으로 실행 인스턴스가 바뀌면 과거 온라인·위치를 초기화한다', () => {
   const state = store();
   state.getState().syncSimulations([simulation({ runtimeId: 'old', state: 'RUNNING' })]);
-  state.getState().upsertFromSSE(pose());
+  state.getState().upsertFromSSE({ ...pose(), runtimeId: 'old' });
   state.getState().syncSimulations([simulation({ runtimeId: 'new' })]);
   assert.equal(state.getState().robots.robot_4.pose, null);
   assert.equal(state.getState().robots.robot_4.online, false);
+});
+
+test('새 runtime 이후 도착한 이전 실행의 SSE와 REST를 거부한다', () => {
+  const state = store();
+  state.getState().syncSimulations([simulation({ runtimeId: 'new' })]);
+  state.getState().upsertFromSSE({ ...pose(), runtimeId: 'old' });
+  state.getState().initFromRest([{ robotId: 'robot_4', runtimeId: 'old', online: true,
+    lastSeen: pose().timestamp, pose: {x: 9, y: 9, timestamp: pose().timestamp}, battery: null, state: 'idle' }]);
+  state.getState().initTrail('robot_4', [{x: 10, y: 10}], 'old');
+  assert.equal(state.getState().robots.robot_4.pose, null);
+  assert.deepEqual(state.getState().robots.robot_4.trail, []);
+  state.getState().upsertFromSSE({ ...pose(), runtimeId: 'new' });
+  assert.equal(state.getState().robots.robot_4.pose.x, 2);
 });

@@ -26,6 +26,10 @@ public class OfflineDetectorService {
         return lastSeen.isBefore(OffsetDateTime.now().minusSeconds(thresholdSeconds));
     }
 
+    public boolean isOffline(String robotId, String runtimeId) {
+        return isOffline(robotId) || !java.util.Objects.equals(runtimeId, streamService.getRuntimeId(robotId));
+    }
+
     @Scheduled(fixedRateString = "${fleet.offline-check-ms:5000}", initialDelayString = "${fleet.offline-initial-delay:1000}")
     public void detectOfflineRobots() {
         OffsetDateTime threshold = OffsetDateTime.now().minusSeconds(thresholdSeconds);
@@ -34,7 +38,8 @@ public class OfflineDetectorService {
             OffsetDateTime lastSeen = entry.getValue();
             if (lastSeen.isBefore(threshold)) {
                 log.info("[Offline] 로봇 오프라인 감지: {} (마지막 수신: {})", robotId, lastSeen);
-                streamService.broadcast(OfflineTelemetryDto.of(robotId, OffsetDateTime.now()));
+                streamService.broadcast(new OfflineTelemetryDto("offline", robotId, OffsetDateTime.now(),
+                        streamService.getRuntimeId(robotId), new com.robot.fleet.domain.telemetry.dto.StatusTelemetryDataDto("offline")));
             }
         }
     }

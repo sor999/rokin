@@ -16,17 +16,19 @@ export function fetchRobots(): Promise<RobotStatusDto[]> {
 /** 특정 로봇의 위치 이력 조회 */
 export function fetchPoseHistory(
   robotId: string,
-  limit = 200
+  limit = 200,
+  runtimeId?: string
 ): Promise<PoseDto[]> {
-  return get<PoseDto[]>(`/robots/${robotId}/pose/history?limit=${limit}`);
+  return get<PoseDto[]>(`/robots/${robotId}/pose/history?limit=${limit}${runtimeId ? `&runtimeId=${encodeURIComponent(runtimeId)}` : ""}`);
 }
 
 /** 특정 로봇의 배터리 이력 조회 */
 export function fetchBatteryHistory(
   robotId: string,
-  limit = 100
+  limit = 100,
+  runtimeId?: string
 ): Promise<BatteryDto[]> {
-  return get<BatteryDto[]>(`/robots/${robotId}/battery/history?limit=${limit}`);
+  return get<BatteryDto[]>(`/robots/${robotId}/battery/history?limit=${limit}${runtimeId ? `&runtimeId=${encodeURIComponent(runtimeId)}` : ""}`);
 }
 
 /** 시뮬레이터 등록 상태를 조회한다. */

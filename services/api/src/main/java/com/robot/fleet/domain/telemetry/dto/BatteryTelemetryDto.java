@@ -12,6 +12,7 @@ public record BatteryTelemetryDto(
         String robotId,
         @JsonProperty("timestamp")
         OffsetDateTime occurredAt,
+        String runtimeId,
         BatteryTelemetryDataDto data
 ) implements TelemetryEvent {
 
@@ -20,6 +21,6 @@ public record BatteryTelemetryDto(
             OffsetDateTime occurredAt,
             double level
     ) {
-        return new BatteryTelemetryDto("battery", robotId, occurredAt, new BatteryTelemetryDataDto(level));
+        return new BatteryTelemetryDto("battery", robotId, occurredAt, null, new BatteryTelemetryDataDto(level));
     }
 }
