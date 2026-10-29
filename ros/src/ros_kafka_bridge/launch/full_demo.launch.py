@@ -30,13 +30,12 @@ def generate_launch_description():
             package='ros_kafka_bridge',
             executable='ros_kafka_bridge_node',
             name='ros_kafka_bridge_node',
-            parameters=[bridge_config],
             # Humble의 dict→YAML 재직렬화에서 문자열 인용이 사라지므로 ROS CLI로 전달한다.
-            ros_arguments=[argument for key, env in (
+            ros_arguments=['--params-file', bridge_config, *[argument for key, env in (
                 ('fleet_id', 'FLEET_ID'),
                 ('ownership_generation', 'FLEET_OWNERSHIP_GENERATION'),
             ) if env in os.environ
-                for argument in ('-p', f'{key}:={json.dumps(os.environ[env])}')],
+                for argument in ('-p', f'ros_kafka_bridge_node:{key}:={json.dumps(os.environ[env])}')]],
             output='screen',
         ),
     ])
