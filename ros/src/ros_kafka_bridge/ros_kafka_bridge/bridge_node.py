@@ -9,7 +9,7 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, String
 
 from .consumer import KafkaCommandConsumer
-from .commands import FleetCommandRouter
+from .commands import FleetCommandRouter, ManagedFleetCommandRouter
 from .producer import KafkaTelemetryProducer
 
 
@@ -20,8 +20,8 @@ class RosKafkaBridgeNode(Node):
     - Kafka → ROS (Command): cmd.robot 토픽을 Consume해 각 로봇의 /fleet/{robot_id}/cmd 로 Relay
     """
 
-    def __init__(self):
-        super().__init__('ros_kafka_bridge_node')
+    def __init__(self, managed=False, runtime_id=None, **kwargs):
+        super().__init__('ros_kafka_bridge_node', **kwargs)
 
         # 파라미터 선언
         self.declare_parameter('kafka_broker', 'kafka:29092')
@@ -36,48 +36,22 @@ class RosKafkaBridgeNode(Node):
         group_id: str = self.get_parameter('kafka_group_id').value
         self._robot_ids: list[str] = self.get_parameter('robot_ids').value
 
-        self._router = FleetCommandRouter(
-            self.get_parameter('fleet_id').value, self._robot_ids, self._on_kafka_command,
-            fleet_robot_ids=self.get_parameter('fleet_robot_ids').value,
-            ownership_generation=self.get_parameter('ownership_generation').value,
-        )
+        if managed:
+            self._robot_ids = []
+            self._router = ManagedFleetCommandRouter(
+                self.get_parameter('fleet_id').value, self._on_kafka_command, runtime_id)
+        else:
+            self._router = FleetCommandRouter(
+                self.get_parameter('fleet_id').value, self._robot_ids, self._on_kafka_command,
+                fleet_robot_ids=self.get_parameter('fleet_robot_ids').value,
+                ownership_generation=self.get_parameter('ownership_generation').value,
+            )
 
-        # Kafka Producer (ROS → Kafka)
         self._producer = KafkaTelemetryProducer(broker)
-
-        # 각 로봇의 Command Publisher (Kafka → ROS)
-        self._cmd_publishers: dict[str, object] = {}
+        self._cmd_publishers = {}
+        self._subscriptions_by_robot = {}
         for robot_id in self._robot_ids:
-            self._cmd_publishers[robot_id] = self.create_publisher(
-                String, f'/fleet/{robot_id}/cmd', 10
-            )
-
-        # ROS 구독 (Telemetry → Kafka)
-        for robot_id in self._robot_ids:
-            self.create_subscription(
-                Pose2D,
-                f'/fleet/{robot_id}/pose',
-                lambda msg, rid=robot_id: self._on_pose(rid, msg),
-                10,
-            )
-            self.create_subscription(
-                Float32,
-                f'/fleet/{robot_id}/battery',
-                lambda msg, rid=robot_id: self._on_battery(rid, msg),
-                10,
-            )
-            self.create_subscription(
-                String,
-                f'/fleet/{robot_id}/status',
-                lambda msg, rid=robot_id: self._on_status(rid, msg),
-                10,
-            )
-            self.create_subscription(
-                String,
-                f'/fleet/{robot_id}/ack',
-                lambda msg, rid=robot_id: self._on_ack(rid, msg),
-                10,
-            )
+            self.attach_robot(robot_id)
 
         # Kafka Consumer (cmd.robot → ROS)
         self._consumer = KafkaCommandConsumer(
@@ -92,6 +66,43 @@ class RosKafkaBridgeNode(Node):
         self.get_logger().info(
             f"RosKafkaBridgeNode 시작 | broker={broker} | robots={self._robot_ids}"
         )
+
+    def attach_robot(self, robot_id):
+        """executor에서 로봇의 명령 발행자와 관측 구독을 추가한다."""
+        if robot_id in self._cmd_publishers:
+            return
+        subscriptions = []
+        publisher = self.create_publisher(String, f'/fleet/{robot_id}/cmd', 10)
+        try:
+            for message_type, topic, callback in (
+                    (Pose2D, 'pose', self._on_pose), (Float32, 'battery', self._on_battery),
+                    (String, 'status', self._on_status), (String, 'ack', self._on_ack)):
+                subscriptions.append(self.create_subscription(
+                    message_type, f'/fleet/{robot_id}/{topic}',
+                    lambda msg, cb=callback: cb(robot_id, msg), 10))
+        except Exception:
+            for subscription in subscriptions:
+                self.destroy_subscription(subscription)
+            self.destroy_publisher(publisher)
+            raise
+        self._cmd_publishers[robot_id] = publisher
+        self._subscriptions_by_robot[robot_id] = subscriptions
+
+    def detach_robot(self, robot_id):
+        """명령 라우팅에서 제외한 뒤 ROS 리소스를 해제한다."""
+        for subscription in self._subscriptions_by_robot.pop(robot_id, []):
+            self.destroy_subscription(subscription)
+        publisher = self._cmd_publishers.pop(robot_id, None)
+        if publisher is not None:
+            self.destroy_publisher(publisher)
+
+    def robot_ready(self, robot_id):
+        """Kafka 할당과 로봇 명령·관측 DDS 경로가 모두 준비됐는지 확인한다."""
+        publisher = self._cmd_publishers.get(robot_id)
+        return (self._consumer.ready.is_set() and publisher is not None
+                and publisher.get_subscription_count() > 0
+                and all(self.count_publishers(subscription.topic_name) > 0
+                        for subscription in self._subscriptions_by_robot[robot_id]))
 
     # 헬퍼
 

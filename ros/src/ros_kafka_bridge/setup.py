@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'ros_kafka_bridge_node = ros_kafka_bridge.bridge_node:main',
+            'simulation_manager = ros_kafka_bridge.simulation_manager:main',
         ],
     },
 )

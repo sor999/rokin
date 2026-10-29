@@ -10,8 +10,8 @@ from .logic import FakeRobotLogic
 from .commands import RobotCommands
 
 class FakeRobotNode(Node):
-    def __init__(self):
-        super().__init__('fake_robot_node')
+    def __init__(self, node_name='fake_robot_node', **kwargs):
+        super().__init__(node_name, **kwargs)
 
         # Declare parameters
         self.declare_parameter('robot_id', 'robot_1')

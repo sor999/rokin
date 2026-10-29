@@ -22,6 +22,8 @@ export default function RobotDetailPage({
   const { robotId } = use(params);
   const robots = useFleetStore((s) => s.robots);
   const robot = robots[robotId];
+  const simulation = useFleetStore((s) => s.simulations?.[robotId]);
+  const registryConnected = useFleetStore((s) => s.registryConnected);
   const { isConnected, lastAck, lastResult, sendCommand } = useCommandWS(robotId);
   const [batteryHistory, setBatteryHistory] = useState<BatteryDto[]>([]);
 
@@ -162,6 +164,7 @@ export default function RobotDetailPage({
             key={robotId}
             robotId={robotId}
             isConnected={isConnected}
+            canCommand={registryConnected && robot.online && simulation?.state === "RUNNING" && simulation.desiredState === "RUNNING"}
             lastAck={lastAck}
             lastResult={lastResult}
             onSendCommand={sendCommand}
@@ -173,7 +176,7 @@ export default function RobotDetailPage({
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Last Seen</span>
                 <span className="font-mono text-foreground">
-                  {new Date(robot.lastSeen).toLocaleTimeString("ko-KR")}
+                  {robot.lastSeen ? new Date(robot.lastSeen).toLocaleTimeString("ko-KR") : "--"}
                 </span>
               </div>
             </CardContent>

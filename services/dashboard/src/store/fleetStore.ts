@@ -5,6 +5,7 @@ import type {
   RobotState,
   RobotStatusDto,
   TelemetryEvent,
+  Simulation,
 } from "@/types";
 
 const MAX_TRAIL = 200;
@@ -12,6 +13,11 @@ const MAX_TRAIL = 200;
 interface FleetStore {
   robots: Record<string, RobotState>;
   realtime: RealtimeStatus;
+  simulations: Record<string, Simulation> | null;
+  registryConnected: boolean;
+  simulationError: string | null;
+  syncSimulations: (list: Simulation[]) => void;
+  setSimulationError: (error: string | null) => void;
 
   /** REST /api/robots 초기 로딩 결과 반영 */
   initFromRest: (list: RobotStatusDto[]) => void;
@@ -32,7 +38,7 @@ function emptyRobot(robotId: string): RobotState {
   return {
     robotId,
     online: false,
-    lastSeen: new Date().toISOString(),
+    lastSeen: null,
     pose: null,
     battery: null,
     state: "unknown",
@@ -42,6 +48,26 @@ function emptyRobot(robotId: string): RobotState {
 
 export const useFleetStore = create<FleetStore>((set) => ({
   robots: {},
+  simulations: null,
+  registryConnected: false,
+  simulationError: null,
+  setSimulationError: (error) => set({ simulationError: error, registryConnected: error === null }),
+  syncSimulations: (list) => set((prev) => {
+    const simulations = { ...prev.simulations };
+    for (const item of list) {
+      const current = simulations[item.robotId];
+      if (!current || current.version <= item.version) simulations[item.robotId] = item;
+    }
+    const robots: Record<string, RobotState> = {};
+    for (const item of Object.values(simulations)) {
+      if (item.desiredState === "DELETED") continue;
+      const previous = prev.simulations?.[item.robotId];
+      const restarted = previous?.runtimeId && item.runtimeId && previous.runtimeId !== item.runtimeId;
+      const existing = restarted ? emptyRobot(item.robotId) : prev.robots[item.robotId] ?? emptyRobot(item.robotId);
+      robots[item.robotId] = item.state === "RUNNING" ? existing : { ...existing, online: false };
+    }
+    return { simulations, robots };
+  }),
   realtime: {
     state: "connecting",
     lastEventAt: null,
@@ -49,24 +75,23 @@ export const useFleetStore = create<FleetStore>((set) => ({
     error: null,
   },
 
-  initFromRest: (list) => {
-    const robots: Record<string, RobotState> = {};
+  initFromRest: (list) => set((prev) => {
+    const robots = { ...prev.robots };
     for (const dto of list) {
+      if (prev.simulations && prev.simulations[dto.robotId]?.desiredState !== "RUNNING") continue;
+      const existing = robots[dto.robotId];
+      if (existing?.lastSeen && (!dto.lastSeen || existing.lastSeen >= dto.lastSeen)) continue;
       robots[dto.robotId] = {
-        robotId: dto.robotId,
-        online: dto.online,
-        lastSeen: dto.lastSeen,
-        pose: dto.pose,
-        battery: dto.battery,
-        state: dto.state ?? "unknown",
-        trail: dto.pose ? [{ x: dto.pose.x, y: dto.pose.y }] : [],
+        ...dto, state: dto.state ?? "unknown",
+        trail: existing?.trail.length ? existing.trail : dto.pose ? [{ x: dto.pose.x, y: dto.pose.y }] : [],
       };
     }
-    set({ robots });
-  },
+    return { robots };
+  }),
 
   initTrail: (robotId, points) =>
     set((prev) => {
+      if (prev.simulations && prev.simulations[robotId]?.desiredState !== "RUNNING") return {};
       const existing = prev.robots[robotId] ?? emptyRobot(robotId);
       // REST 이력 + SSE로 누적된 최근 trail 병합 (최대 MAX_TRAIL)
       const merged = [...points, ...existing.trail];
@@ -79,6 +104,7 @@ export const useFleetStore = create<FleetStore>((set) => ({
 
   upsertFromSSE: (event) =>
     set((prev) => {
+      if (prev.simulations && prev.simulations[event.robotId]?.desiredState !== "RUNNING") return {};
       const existing = prev.robots[event.robotId] ?? emptyRobot(event.robotId);
       const updated = { ...existing, lastSeen: event.timestamp };
 

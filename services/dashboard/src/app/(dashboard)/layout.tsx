@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Sidebar } from "@/components/layouts/Sidebar";
 import { useFleetStore } from "@/store/fleetStore";
 import { useFleetSSE } from "@/hooks/useFleetSSE";
+import { useSimulations } from "@/hooks/useSimulations";
 import { fetchRobots } from "@/services/api";
 
 /** 대시보드 공통 레이아웃: Sidebar + 실시간 SSE 구독 + REST 초기 로딩 */
@@ -25,6 +26,7 @@ export default function DashboardLayout({
 
   // SSE 실시간 구독
   useFleetSSE();
+  useSimulations();
 
   return (
     <div className="flex h-full">

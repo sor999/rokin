@@ -15,6 +15,7 @@ interface CommandPanelProps {
   robotId: string;
   lastResult: CommandResult | null;
   isConnected: boolean;
+  canCommand: boolean;
   lastAck: AckDto | null;
   onSendCommand: (
     robotId: string,
@@ -51,6 +52,7 @@ function cmdBadgeVariant(
 /** 로봇 제어 패널: move_to(x, y) 전송, stop, Ack 상태 표시 및 timeout 재시도 */
 export function CommandPanel({
   robotId,
+  canCommand,
   isConnected,
   lastAck,
   lastResult,
@@ -148,6 +150,7 @@ export function CommandPanel({
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {!canCommand && <p role="status" className="text-xs text-muted-foreground">로봇 실행 준비와 온라인 상태를 기다리고 있습니다.</p>}
         {/* move_to 폼 */}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
@@ -185,7 +188,7 @@ export function CommandPanel({
           <Button
             size="sm"
             onClick={handleMoveTo}
-            disabled={!isConnected || cmdState === "pending"}
+            disabled={!isConnected || !canCommand || cmdState === "pending"}
             className="flex-1"
           >
             Move To
@@ -194,7 +197,7 @@ export function CommandPanel({
             size="sm"
             variant="destructive"
             onClick={handleStop}
-            disabled={!isConnected || (lastCommand?.command === "stop" && cmdState === "pending")}
+            disabled={!isConnected || !canCommand || (lastCommand?.command === "stop" && cmdState === "pending")}
           >
             Stop
           </Button>
@@ -223,7 +226,7 @@ export function CommandPanel({
             size="sm"
             variant="outline"
             onClick={handleRetry}
-            disabled={!isConnected}
+            disabled={!isConnected || !canCommand}
             className="w-full"
           >
             {lastCommand?.command === "stop" ? "Retry Stop" : "Retry Move To"}

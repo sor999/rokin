@@ -62,3 +62,7 @@ logging:
     com.robot.fleet: INFO
     org.springframework.kafka: WARN
     org.apache.kafka: ERROR
+
+simulation:
+  internal-token: ${SIMULATOR_INTERNAL_TOKEN:}
+  max-robots: ${SIMULATOR_MAX_ROBOTS:20}

@@ -26,9 +26,16 @@ public class RobotQueryService {
     private final TelemetryBatteryRepository batteryRepo;
     private final TelemetryStatusRepository statusRepo;
     private final OfflineDetectorService offlineDetector;
+    private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
 
     public List<RobotStatusDto> getAllRobots() {
-        return poseRepo.findDistinctRobotIds().stream()
+        var registered = simulations.list();
+        var removed = registered.stream().filter(r -> r.desiredState().equals("DELETED"))
+                .map(com.robot.fleet.domain.simulation.dto.SimulationDto::robotId).collect(java.util.stream.Collectors.toSet());
+        return java.util.stream.Stream.concat(poseRepo.findDistinctRobotIds().stream(),
+                        registered.stream().filter(r -> r.desiredState().equals("RUNNING"))
+                                .map(com.robot.fleet.domain.simulation.dto.SimulationDto::robotId))
+                .distinct().filter(id -> !removed.contains(id))
                 .map(robotId -> {
                     TelemetryPose pose = poseRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId).orElse(null);
                     TelemetryBattery battery = batteryRepo.findTopByRobotIdOrderByOccurredAtDesc(robotId).orElse(null);

@@ -17,6 +17,7 @@ go vet ./...
 
 ```bash
 cd services/dashboard
+pnpm test
 pnpm typecheck
 pnpm build
 ```
@@ -84,3 +85,11 @@ ROS2 Humble에서 `ROS_KAFKA_TEST_BROKER`를 지정하고 `test_ros_integration.
 실제 ROS 명령/Ack 토픽으로 재전송된 이동이 재개되지 않고 과거 정지가 새 이동을 중단하지
 않는지 확인합니다. 테스트는 분리된 Kafka의 `cmd.robot`, `ack.robot`, `dlq.command`와
 telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메인도 사용합니다.
+
+## 가상 로봇 관리 검증
+
+- API의 SimulationServiceTest는 H2에서 등록·삭제·버전·heartbeat·명령 준비 상태를 검증한다.
+- Dashboard의 `pnpm test`는 Node 내장 테스트 도구로 삭제 tombstone·지연 응답·재시작 상태를 검증한다.
+- ROS의 `test_managed_ros_integration.py`는 `ROS_KAFKA_TEST_BROKER`와 별도 DDS 도메인에서
+  실제 관리 노드/HTTP/Kafka/ROS를 연결하고 한 로봇이 이동 중 다른 로봇을 추가·삭제한다.
+- [시나리오와 실행 설정](../features/simulator-management.md)에 따라 생성·정지·삭제·재시작을 확인한다.

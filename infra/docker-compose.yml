@@ -98,6 +98,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-telemetry}
       KAFKA_BROKER_URL: kafka:29092
       FLEET_ID: ${FLEET_ID:-default}
+      SIMULATOR_INTERNAL_TOKEN: ${SIMULATOR_INTERNAL_TOKEN:?Set SIMULATOR_INTERNAL_TOKEN for API and ROS}
+      SIMULATOR_MAX_ROBOTS: ${SIMULATOR_MAX_ROBOTS:-20}
     ports:
       - "${API_PORT:-8080}:8080"
     healthcheck:
@@ -150,8 +152,10 @@ services:
     environment:
       ROS_DOMAIN_ID: 0
       FLEET_ID: ${FLEET_ID:-default}
-      FLEET_OWNERSHIP_GENERATION: ${FLEET_OWNERSHIP_GENERATION:-1}
-    command: ["ros2", "launch", "ros_kafka_bridge", "full_demo.launch.py"]
+      SIMULATOR_INTERNAL_TOKEN: ${SIMULATOR_INTERNAL_TOKEN:?Set SIMULATOR_INTERNAL_TOKEN for API and ROS}
+      SIMULATOR_API_URL: http://api:8080
+      KAFKA_BROKER_URL: kafka:29092
+    command: ["ros2", "run", "ros_kafka_bridge", "simulation_manager"]
     networks:
       - robot_net
     restart: unless-stopped
