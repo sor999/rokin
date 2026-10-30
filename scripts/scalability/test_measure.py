@@ -18,6 +18,7 @@ class MeasurementTest(unittest.TestCase):
                         'min_acceptance_ratio': .99, 'event_p95_seconds': 2, 'ack_p95_seconds': 5}}
 
     def clients(self):
+        """모든 이벤트와 종료 Ack를 받은 정상 연결 두 개를 만든다."""
         clients = [Client(i, 'http://localhost:18081', ['robot_1']) for i in range(2)]
         for client in clients:
             client.events = [(str(n), 100 + n / 6, 100 + n / 6 + .1) for n in range(60)]

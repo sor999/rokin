@@ -22,12 +22,17 @@ DB·Kafka·네트워크·볼륨은 개발 프로젝트와 분리한다. 기존 �
 
 모든 공개 포트는 loopback에만 바인딩한다. API B는 dual 모드에서만 실행하며 ROS 관리
 런타임은 두 모드 모두 하나다. API consumer group은 바꾸지 않아 현재 전달 결함을 재현한다.
+dual 모드는 추가 Compose 파일로 API B의 healthy 의존성을 적용한다. 기동 완료 후에는
+Nginx를 재시작해 재생성된 API 주소를 다시 해석하고 프록시의 health 응답까지 기다린다.
+Prometheus도 모드별 설정을 선택하므로 single 모드에는 API B의 DOWN 대상이 생기지 않는다.
 Nginx는 SSE 버퍼링을 끄고 WebSocket upgrade를 전달한다. 로드밸런서 자동 재시도는 꺼서
 실패를 측정에서 숨기지 않는다. headless 측정은 각 API에 직접 연결하고, 브라우저는
 로드밸런서를 통해 별도로 확인한다.
 
 SockJS의 여러 HTTP 요청은 session ID를 기준으로 같은 API에 전달한다. 이 세션 고정은
 연결 유지용이며 Kafka 소비 서버와 SSE 연결 서버의 불일치를 해결하지 않는다.
+측정 클라이언트는 정상적인 XHR 스트림 EOF에서 같은 세션으로 다시 연결한다.
+구독·CONNECT는 중복 전송하지 않으며 SockJS close 프레임과 전송 오류는 실패로 남긴다.
 Dashboard의 브라우저용 `NEXT_PUBLIC_API_URL`은 호스트의 18080을, 서버 rewrite용
 `API_INTERNAL_URL`은 Docker 내부 `http://load-balancer:8080`을 사용한다. 후자를 생략하면
 기존 공개 API 주소로 fallback하므로 기본 실행 방식은 유지된다.
@@ -125,6 +130,10 @@ scripts/scalability/lab.sh stop
 JSON에는 프로필·판정·클라이언트별 전달률·지연, 명령 오류율, Git revision·dirty 상태,
 DB 통계 전후 값·표본, Prometheus 시계열, 종료 시점 컨테이너 자원을 기록한다.
 로그인 토큰·환경 변수 전체·DB 쿼리 원문은 수집하지 않는다.
+Git 관리 파일과 무시되지 않은 새 파일의 내용 해시도 보존한다. 비교 시 profile·revision·
+working_tree·내용 해시가 모두 같아야 하며, 측정 중 파일 내용이 바뀌면 결과를 저장하지 않는다.
+해시 필드가 없는 이전 원시 결과는 새 비교 도구에서 거부하므로 두 모드를 다시 측정해야 한다.
+아래 첫 기준선 표는 당시 실행 기록으로 보존한다.
 
 ## 자동·수동 검증
 
@@ -201,3 +210,23 @@ API 2대에서는 합집합 기준으로 생성량을 모두 관측했지만 각
 
 제품의 이벤트 전달·온라인 판정·로봇 소유권 계약은 후속 단계에서 변경한다.
 0단계의 테스트 배치와 측정 기준은 이 문서에서 관리하며 새로운 제품 ADR은 추가하지 않았다.
+
+## PR 리뷰 보완 검증
+
+- API B의 healthy 대기, 같은 모드 재기동 뒤 프록시 주소 갱신, 모드별 Prometheus 대상 분리를 보완했다.
+- 소스 내용이 다른 실행의 비교를 거부하고, 측정 도중 변경도 검사한다. 동일한 `git status` 문자열만으로
+  코드가 같다고 판단하지 않는다. `tmp/`의 결과 파일은 해시에 포함하지 않는다.
+- 측정기 테스트 17개 통과. 정상 HTTP 스트림 교체 후 동일 SockJS 세션에서 Ack를 수신하는 테스트와
+  실제 close 프레임을 실패로 유지하는 테스트를 추가했다. Spring의 실제 128KB 임계값까지 가는 장시간
+  부하는 실행하지 않았으며 스트림 교체는 로컬 HTTP fixture로 검증했다.
+- single을 연속 기동한 뒤 현재 API 주소로 프록시가 응답하는 것을 확인했다.
+- single의 Prometheus API 대상은 1개, dual은 2개이며 모두 UP이었다.
+- dual 기동 로그에서 API B healthy 이후 로드밸런서가 시작되는 순서를 확인했다.
+- 같은 소스 해시·작업 트리에서 모드별 smoke를 다시 실행하고 비교를 통과했다. single은 이벤트 540건,
+  정지 5/5건, 모든 연결의 이벤트·Ack 100%로 전체 기준을 만족했다.
+- 이번 dual 배정에서는 B가 이벤트 540건을 모두 소비하고 A 연결의 전달률은 0%였다. 명령은 2/5건
+  접수됐으며 A의 온라인 판정에 따른 거부도 재현됐다. 배정에 따른 차이는 위 최초 표와 구분해 기록하며,
+  제품의 실시간 전송·온라인 판정 수정은 계획 1~2단계에서 수행한다.
+- 재측정 원시는 `tmp/scalability/review-single-smoke.json`, `review-dual-smoke.json`,
+  `review-comparison.json`으로 보존한다. API·Worker·Dashboard·ROS의 필수 검증도 다시 통과했다.
+  PostgreSQL 전용 API 테스트 3개와 별도 Bridge 통합 테스트 6개는 앞선 실행과 동일하게 건너뛰었다.

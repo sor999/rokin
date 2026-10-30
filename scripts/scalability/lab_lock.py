@@ -10,6 +10,7 @@ LOCK_PATH = Path(__file__).resolve().parents[2] / 'tmp/scalability/.lab.lock'
 
 @contextlib.contextmanager
 def lock(path=LOCK_PATH):
+    """측정과 환경 변경이 겹치지 않게 프로세스 간 배타 잠금을 유지한다."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as handle:
         try:

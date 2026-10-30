@@ -14,12 +14,14 @@ import urllib.request
 import uuid
 
 from lab_lock import lock
+from provenance import source_fingerprint
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ORIGIN = 'http://localhost:13000'
 
 
 def request(url, body=None, timeout=10):
+    """JSON 요청을 전송하고 본문이 없는 SockJS 204 응답도 허용한다."""
     payload = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=payload, headers={
         'Content-Type': 'application/json', 'Origin': ORIGIN})
@@ -29,18 +31,21 @@ def request(url, body=None, timeout=10):
 
 
 def percentile(values, p):
+    """가장 가까운 순위 방식의 백분위수를 반환하며 빈 표본은 None으로 표시한다."""
     if not values:
         return None
     return sorted(values)[max(0, math.ceil(len(values) * p) - 1)]
 
 
 def timestamp(value):
+    """Java ISO 시간의 가변 소수점 정밀도를 Python 3.9에 맞춰 해석한다."""
     normalized = re.sub(r'\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)',
                         lambda match: '.' + match[1][:6].ljust(6, '0'), value)
     return dt.datetime.fromisoformat(normalized.replace('Z', '+00:00')).timestamp()
 
 
 def stomp_frames(payload):
+    """하트비트와 NUL 구분자를 처리해 STOMP 명령·헤더·본문을 분리한다."""
     for frame in payload.split('\0'):
         frame = frame.lstrip('\n')
         if not frame:
@@ -62,10 +67,12 @@ class Client:
         self.lock = threading.Lock()
 
     def send(self, command, headers, body=''):
+        """현재 SockJS 세션으로 NUL 종료 STOMP 프레임을 전송한다."""
         frame = command + '\n' + ''.join(f'{k}:{v}\n' for k, v in headers.items()) + '\n' + body + '\0'
         request(self.session + '/xhr_send', [frame])
 
     def sse(self):
+        """관측 이벤트를 기록하고 측정 중 연결 종료나 파싱 실패를 보존한다."""
         try:
             req = urllib.request.Request(self.url + '/api/stream/telemetry', headers={'Origin': ORIGIN})
             with urllib.request.urlopen(req, timeout=20) as response:
@@ -94,46 +101,62 @@ class Client:
                 self.errors.append(f'SSE: {type(error).__name__}: {error}')
 
     def websocket(self):
+        """같은 SockJS 세션의 HTTP 스트림 교체를 허용하고 실제 세션 종료는 기록한다."""
+        opened = False
+        empty_streams = 0
         try:
-            req = urllib.request.Request(self.session + '/xhr_streaming', data=b'', headers={'Origin': ORIGIN})
-            with urllib.request.urlopen(req, timeout=25) as response:
-                while not self.stop.is_set():
-                    line = response.readline()
-                    if not line:
-                        break
-                    line = line.decode().strip()
-                    if line == 'o':
-                        self.send('CONNECT', {'accept-version': '1.2', 'host': 'localhost', 'heart-beat': '0,0'})
-                    elif line.startswith('a'):
-                        for payload in json.loads(line[1:]):
-                            for command, headers, body in stomp_frames(payload):
-                                if command == 'CONNECTED':
-                                    destinations = ['/topic/cmd-result'] + [f'/topic/ack/{r}' for r in self.robots]
-                                    for index, destination in enumerate(destinations):
-                                        self.send('SUBSCRIBE', {'id': str(index), 'destination': destination})
-                                    self.ws_ready.set()
-                                elif command == 'MESSAGE':
-                                    value = json.loads(body)
-                                    with self.lock:
-                                        if headers.get('destination') == '/topic/cmd-result':
-                                            self.results[value['requestId']] = (value, time.time())
-                                        else:
-                                            self.acks.setdefault(value['cmdId'], []).append((value, time.time()))
-                                elif command == 'ERROR':
-                                    self.errors.append('STOMP ERROR: ' + body[:200])
-                    elif line.startswith('c'):
-                        break
-                if not self.stop.is_set():
-                    self.errors.append('SockJS stream closed')
+            while not self.stop.is_set():
+                req = urllib.request.Request(self.session + '/xhr_streaming', data=b'', headers={'Origin': ORIGIN})
+                received_frame = False
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    while not self.stop.is_set():
+                        line = response.readline()
+                        if not line:
+                            break
+                        line = line.decode().strip()
+                        if line == 'o':
+                            if opened:
+                                raise RuntimeError('SockJS session unexpectedly reopened')
+                            opened = True
+                            received_frame = True
+                            self.send('CONNECT', {'accept-version': '1.2', 'host': 'localhost', 'heart-beat': '0,0'})
+                        elif line == 'h':
+                            received_frame = True
+                        elif line.startswith('a'):
+                            received_frame = True
+                            for payload in json.loads(line[1:]):
+                                for command, headers, body in stomp_frames(payload):
+                                    if command == 'CONNECTED':
+                                        destinations = ['/topic/cmd-result'] + [f'/topic/ack/{r}' for r in self.robots]
+                                        for index, destination in enumerate(destinations):
+                                            self.send('SUBSCRIBE', {'id': str(index), 'destination': destination})
+                                        self.ws_ready.set()
+                                    elif command == 'MESSAGE':
+                                        value = json.loads(body)
+                                        with self.lock:
+                                            if headers.get('destination') == '/topic/cmd-result':
+                                                self.results[value['requestId']] = (value, time.time())
+                                            else:
+                                                self.acks.setdefault(value['cmdId'], []).append((value, time.time()))
+                                    elif command == 'ERROR':
+                                        raise RuntimeError('STOMP ERROR: ' + body[:200])
+                        elif line.startswith('c'):
+                            raise RuntimeError('SockJS session closed: ' + line[1:])
+                empty_streams = 0 if received_frame else empty_streams + 1
+                if empty_streams >= 3:
+                    raise RuntimeError('SockJS repeatedly returned an empty stream')
+                self.stop.wait(.05)
         except Exception as error:
             if not self.stop.is_set():
                 self.errors.append(f'SockJS: {type(error).__name__}: {error}')
 
     def start(self):
+        """SSE·SockJS·REST 부하를 독립 스레드에서 시작한다."""
         for target in (self.sse, self.websocket, self.poll):
             threading.Thread(target=target, daemon=True).start()
 
     def poll(self):
+        """초기 목록 조회 후 등록 목록을 2초마다 조회해 지연과 오류를 기록한다."""
         try:
             request(self.url + '/api/robots')
         except Exception as error:
@@ -150,6 +173,7 @@ class Client:
 
 
 def prepare(robots):
+    """기존 등록을 보존해 프로필 로봇을 준비하고 실행 상태를 기다린다."""
     url = 'http://localhost:18081'
     desired = ['robot_1', 'robot_2', 'robot_3'] + [f'scale_robot_{n}' for n in range(4, robots + 1)]
     existing = request(url + '/api/simulations')
@@ -171,6 +195,7 @@ def prepare(robots):
 
 
 def database_snapshot():
+    """격리 프로젝트 DB의 누적 쿼리 통계와 현재 락·연결 상태를 읽는다."""
     sql = """SELECT json_build_object(
       'calls', (SELECT coalesce(sum(calls),0) FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database())),
       'total_exec_ms', (SELECT coalesce(sum(total_exec_time),0) FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database())),
@@ -186,6 +211,7 @@ def database_snapshot():
 
 
 def verify_lab(mode):
+    """측정 대상 컨테이너·모드·loopback 포트가 격리 설정과 일치하는지 확인한다."""
     if mode == 'single':
         extra = subprocess.check_output(['docker', 'ps', '-q', '--filter',
             'label=com.docker.compose.project=rokin-scale-lab', '--filter',
@@ -223,6 +249,7 @@ QUERIES = {
 
 
 def metrics_snapshot(start, end):
+    """측정 구간의 Prometheus 시계열을 읽고 조회 실패는 실행 오류로 처리한다."""
     result = {}
     for name, query in QUERIES.items():
         params = urllib.parse.urlencode({'query': query, 'start': start, 'end': end, 'step': 5})
@@ -234,6 +261,7 @@ def metrics_snapshot(start, end):
 
 
 def summarize(clients, commands, start, end, profile):
+    """생성량·클라이언트별 전달률·명령 접수·Ack 지연을 함께 판정한다."""
     snapshots = []
     for client in clients:
         with client.lock:
@@ -274,6 +302,8 @@ def summarize(clients, commands, start, end, profile):
 
 
 def run(args):
+    """고정 프로필의 부하와 지표를 수집하고 소스 동일성을 확인해 결과를 저장한다."""
+    fingerprint = source_fingerprint(ROOT)
     verify_lab(args.mode)
     profiles = json.loads((ROOT / 'scripts/scalability/profiles.json').read_text())
     profile = {**profiles[args.profile], 'limits': {'min_event_source_ratio': .90, 'min_delivery_ratio': .99,
@@ -322,6 +352,7 @@ def run(args):
                            '{"cpus":{{.NCPU}},"memory_bytes":{{.MemTotal}},"architecture":"{{.Architecture}}","version":"{{.ServerVersion}}"}'], text=True)),
                        'git_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                        'working_tree': subprocess.check_output(['git', 'status', '--short'], cwd=ROOT, text=True).splitlines(),
+                       'source_fingerprint': fingerprint,
                        'database': {'before': before, 'after': database_snapshot(), 'samples': db_samples},
                        'prometheus': metrics_snapshot(start, end)})
         metrics = report['prometheus']
@@ -335,6 +366,8 @@ def run(args):
         ids = subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=rokin-scale-lab'], text=True).split()
         report['docker_stats'] = subprocess.check_output(['docker', 'stats', '--no-stream', '--format', '{{json .}}', *ids], text=True).splitlines()
         output = pathlib.Path(args.output)
+        if source_fingerprint(ROOT) != fingerprint:
+            raise RuntimeError('측정 중 소스가 변경되어 결과를 저장하지 않습니다. 같은 코드로 다시 실행하세요.')
         output.parent.mkdir(parents=True, exist_ok=True)
         pending = output.with_name(output.name + '.pending')
         pending.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
