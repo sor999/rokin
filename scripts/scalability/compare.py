@@ -11,6 +11,15 @@ def validate_pair(single, dual):
     for key in ('profile', 'git_revision', 'working_tree'):
         if single.get(key) != dual.get(key):
             raise ValueError(f'같은 {key}의 실행만 비교할 수 있습니다.')
+    for key in ('cpus', 'memory_bytes', 'architecture', 'version'):
+        first, second = single.get('docker_host') or {}, dual.get('docker_host') or {}
+        values = (first.get(key), second.get(key))
+        valid = all(type(value) is int and value > 0 for value in values) if key in ('cpus', 'memory_bytes') else all(
+            isinstance(value, str) and value.strip() for value in values)
+        if not valid:
+            raise ValueError(f'Docker host {key} 정보가 없는 결과는 비교할 수 없습니다.')
+        if first[key] != second[key]:
+            raise ValueError(f'Docker host {key} 값이 다른 실행은 비교할 수 없습니다.')
     if not single.get('source_fingerprint') or not dual.get('source_fingerprint'):
         raise ValueError('소스 fingerprint가 없는 이전 결과입니다. 두 모드를 다시 측정하세요.')
     if single['source_fingerprint'] != dual['source_fingerprint']:

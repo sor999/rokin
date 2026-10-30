@@ -17,12 +17,16 @@ services:
     container_name: !reset null
   api:
     container_name: !reset null
+    environment:
+      WEBSOCKET_PRESERVE_RECEIVE_ORDER: "true"
     ports: !override ["127.0.0.1:18081:8080"]
   api-b:
     extends:
       file: docker-compose.yml
       service: api
     container_name: !reset null
+    environment:
+      WEBSOCKET_PRESERVE_RECEIVE_ORDER: "true"
     profiles: [dual]
     ports: !override ["127.0.0.1:18082:8080"]
   worker:

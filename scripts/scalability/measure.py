@@ -14,7 +14,7 @@ import urllib.request
 import uuid
 
 from lab_lock import lock
-from provenance import source_fingerprint
+from provenance import source_fingerprint, validate_output
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ORIGIN = 'http://localhost:13000'
@@ -65,6 +65,8 @@ class Client:
         self.events, self.results, self.acks, self.errors = [], {}, {}, []
         self.http_latencies = []
         self.lock = threading.Lock()
+        self.ready_destination = '/topic/scale-ready/' + uuid.uuid4().hex
+        self.ready_token = uuid.uuid4().hex
 
     def send(self, command, headers, body=''):
         """현재 SockJS 세션으로 NUL 종료 STOMP 프레임을 전송한다."""
@@ -127,14 +129,19 @@ class Client:
                             for payload in json.loads(line[1:]):
                                 for command, headers, body in stomp_frames(payload):
                                     if command == 'CONNECTED':
-                                        destinations = ['/topic/cmd-result'] + [f'/topic/ack/{r}' for r in self.robots]
+                                        destinations = ['/topic/cmd-result'] + [f'/topic/ack/{r}' for r in self.robots] + [self.ready_destination]
                                         for index, destination in enumerate(destinations):
                                             self.send('SUBSCRIBE', {'id': str(index), 'destination': destination})
-                                        self.ws_ready.set()
+                                        self.send('SEND', {'destination': self.ready_destination, 'content-type': 'application/json'},
+                                                  json.dumps({'token': self.ready_token}))
                                     elif command == 'MESSAGE':
                                         value = json.loads(body)
                                         with self.lock:
-                                            if headers.get('destination') == '/topic/cmd-result':
+                                            if headers.get('destination') == self.ready_destination:
+                                                if value.get('token') != self.ready_token:
+                                                    raise RuntimeError('구독 준비 응답 토큰이 일치하지 않습니다.')
+                                                self.ws_ready.set()
+                                            elif headers.get('destination') == '/topic/cmd-result':
                                                 self.results[value['requestId']] = (value, time.time())
                                             else:
                                                 self.acks.setdefault(value['cmdId'], []).append((value, time.time()))
@@ -231,6 +238,11 @@ def verify_lab(mode):
                            '{{json .NetworkSettings.Ports}}', ids[0]], text=True))
         if ports.get('8080/tcp') != [{'HostIp': '127.0.0.1', 'HostPort': port}]:
             raise RuntimeError(f'격리 포트 매핑이 다릅니다: {service}')
+        if service in ('api', 'api-b'):
+            enabled = subprocess.check_output(['docker', 'inspect', '--format',
+                '{{range .Config.Env}}{{if eq . "WEBSOCKET_PRESERVE_RECEIVE_ORDER=true"}}true{{end}}{{end}}', ids[0]], text=True).strip()
+            if enabled != 'true':
+                raise RuntimeError(f'구독 준비 순서 보장 설정이 필요합니다: {service}')
 
 
 QUERIES = {
@@ -301,8 +313,15 @@ def summarize(clients, commands, start, end, profile):
             'acceptance_p95_seconds': percentile(acceptance_lag, .95), 'ack_p95_seconds': percentile(ack_lag, .95)}
 
 
+def targets_healthy(series):
+    """모든 수집 대상이 표본을 가지고 측정 구간 내내 UP인 경우만 허용한다."""
+    return bool(series) and all(
+        target['values'] and all(float(value) == 1 for _, value in target['values']) for target in series)
+
+
 def run(args):
     """고정 프로필의 부하와 지표를 수집하고 소스 동일성을 확인해 결과를 저장한다."""
+    output = validate_output(ROOT, args.output)
     fingerprint = source_fingerprint(ROOT)
     verify_lab(args.mode)
     profiles = json.loads((ROOT / 'scripts/scalability/profiles.json').read_text())
@@ -344,6 +363,7 @@ def run(args):
                 db_samples.append(database_snapshot())
                 next_sample += 5
             time.sleep(.05)
+        database_after = database_snapshot()
         time.sleep(2)
         report = summarize(clients, commands, start, end, profile)
         report.update({'mode': args.mode, 'profile': profile, 'start': start, 'end': end,
@@ -353,7 +373,7 @@ def run(args):
                        'git_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                        'working_tree': subprocess.check_output(['git', 'status', '--short'], cwd=ROOT, text=True).splitlines(),
                        'source_fingerprint': fingerprint,
-                       'database': {'before': before, 'after': database_snapshot(), 'samples': db_samples},
+                       'database': {'before': before, 'after': database_after, 'samples': db_samples},
                        'prometheus': metrics_snapshot(start, end)})
         metrics = report['prometheus']
         rest_delays = [delay for client in clients for sent, delay in list(client.http_latencies) if start <= sent <= end]
@@ -362,10 +382,10 @@ def run(args):
         report['checks']['rest_latency'] = bool(rest_delays) and percentile(rest_delays, .95) <= 1
         report['checks']['metrics_present'] = all(metrics[key] for key in (
             'kafka_lag', 'worker_buffer', 'worker_memory_bytes', 'api_heap_bytes', 'db_connections'))
+        report['checks']['targets_up'] = targets_healthy(metrics['target_up'])
         report['passed'] = all(report['checks'].values())
         ids = subprocess.check_output(['docker', 'ps', '-q', '--filter', 'label=com.docker.compose.project=rokin-scale-lab'], text=True).split()
         report['docker_stats'] = subprocess.check_output(['docker', 'stats', '--no-stream', '--format', '{{json .}}', *ids], text=True).splitlines()
-        output = pathlib.Path(args.output)
         if source_fingerprint(ROOT) != fingerprint:
             raise RuntimeError('측정 중 소스가 변경되어 결과를 저장하지 않습니다. 같은 코드로 다시 실행하세요.')
         output.parent.mkdir(parents=True, exist_ok=True)
