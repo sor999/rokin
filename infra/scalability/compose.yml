@@ -36,6 +36,7 @@ services:
     container_name: !reset null
     environment:
       ROS_DOMAIN_ID: 83
+      SIMULATOR_API_URL: http://load-balancer:8080
   dashboard:
     container_name: !reset null
     ports: !override ["127.0.0.1:13000:3000"]

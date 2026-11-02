@@ -21,10 +21,10 @@ class TelemetryRuntimeTest {
         ReflectionTestUtils.setField(offline, "thresholdSeconds", 30L);
         var simulations = mock(SimulationService.class);
         when(simulations.acceptsTelemetry("robot", "current")).thenReturn(true);
-        var listener = new TelemetryKafkaListener(stream, mapper, simulations);
+        var listener = new TelemetryKafkaListener(new com.robot.fleet.domain.realtime.LocalRealtimePublisher(stream, mock(org.springframework.messaging.simp.SimpMessagingTemplate.class)), mapper, simulations);
         stream.broadcast(new PoseTelemetryDto("pose", "robot", OffsetDateTime.now().plusYears(1), "old", new PoseTelemetryDataDto(99, 99)));
         // when
-        String current = "{\"robot_id\":\"robot\",\"timestamp\":\"2020-01-01T00:00:00Z\",\"simulation_runtime_id\":\"current\",\"data\":{\"x\":1,\"y\":2}}";
+        String current = "{\"event_id\":\"0b181550-d9e4-4a66-8e0b-360d71dbece4\",\"robot_id\":\"robot\",\"timestamp\":\"2020-01-01T00:00:00Z\",\"simulation_runtime_id\":\"current\",\"data\":{\"x\":1,\"y\":2}}";
         listener.handlePoseTelemetry(current);
         listener.handlePoseTelemetry(current.replace("current", "old"));
         // then

@@ -10,6 +10,7 @@ if [ "$action" != config ] && [ "$action" != status ] && [ "${ROKIN_SCALE_LOCK_H
 fi
 export SIMULATOR_INTERNAL_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 export POSTGRES_USER=postgres POSTGRES_PASSWORD=scale_lab_only POSTGRES_DB=telemetry
+export REALTIME_REDIS_PASSWORD=scale_realtime_only
 export FLEET_ID=default SIMULATOR_MAX_ROBOTS=20
 export KAFKA_GROUP_ID=telemetry-worker KAFKA_TOPICS=telemetry.pose,telemetry.battery,telemetry.status,ack.robot
 export BATCH_SIZE=100 BATCH_FLUSH_MS=500 DLQ_TOPIC=dlq.telemetry METRICS_ADDR=:2112

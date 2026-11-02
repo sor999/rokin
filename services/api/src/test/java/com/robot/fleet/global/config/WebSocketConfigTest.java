@@ -20,7 +20,8 @@ class WebSocketConfigTest {
         try (var context = new AnnotationConfigWebApplicationContext()) {
             context.setServletContext(new MockServletContext());
             TestPropertyValues.of("fleet.websocket.preserve-receive-order=" + enabled).applyTo(context);
-            context.register(WebSocketConfig.class);
+            context.register(WebSocketConfig.class, com.robot.fleet.domain.realtime.RealtimeState.class,
+                    com.robot.fleet.domain.realtime.RealtimeSessions.class);
 
             // when
             context.refresh();

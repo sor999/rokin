@@ -1,6 +1,7 @@
 package com.robot.fleet.domain.telemetry.listener;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.robot.fleet.domain.realtime.RealtimePublisher;
 import com.robot.fleet.domain.telemetry.dto.BatteryTelemetryMessageDto;
 import com.robot.fleet.domain.telemetry.dto.BatteryTelemetryDto;
 import com.robot.fleet.domain.telemetry.dto.PoseTelemetryMessageDto;
@@ -8,7 +9,6 @@ import com.robot.fleet.domain.telemetry.dto.PoseTelemetryDto;
 import com.robot.fleet.domain.telemetry.dto.StatusTelemetryMessageDto;
 import com.robot.fleet.domain.telemetry.dto.StatusTelemetryDto;
 import com.robot.fleet.domain.telemetry.dto.TelemetryEvent;
-import com.robot.fleet.domain.telemetry.service.TelemetryStreamService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -21,7 +21,7 @@ import java.util.function.Function;
 @RequiredArgsConstructor
 public class TelemetryKafkaListener {
 
-    private final TelemetryStreamService streamService;
+    private final RealtimePublisher publisher;
     private final ObjectMapper objectMapper;
     private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
 
@@ -31,15 +31,23 @@ public class TelemetryKafkaListener {
             Class<T> messageType,
             Function<T, TelemetryEvent> mapper
     ) {
+        TelemetryEvent event;
+        String eventId;
         try {
-            T message = objectMapper.readValue(payload, messageType);
-            TelemetryEvent event = mapper.apply(message);
+            var json = objectMapper.readTree(payload);
+            com.robot.fleet.domain.realtime.RealtimeValidation.data(type, json.path("data"));
+            eventId = json.path("event_id").asText();
+            java.util.UUID.fromString(eventId);
+            T message = objectMapper.treeToValue(json, messageType);
+            event = mapper.apply(message);
+            if (event.robotId() == null || !event.robotId().matches("[A-Za-z][A-Za-z0-9_-]{0,127}") || event.occurredAt() == null || event.data() == null) throw new IllegalArgumentException("Invalid telemetry");
             if (!simulations.acceptsTelemetry(event.robotId(), event.runtimeId())) return;
-            streamService.broadcast(event);
-            log.debug("[Listener] {} SSE 브로드캐스트 완료 | robotId={}", type, event.robotId());
+
         } catch (Exception e) {
-            log.warn("[Listener] {} 메시지 처리 실패: {}", type, e.getMessage());
+            log.warn("[Listener] Invalid {} message: {}", type, e.getClass().getSimpleName());
+            return;
         }
+        publisher.telemetry(eventId, event);
     }
 
     @KafkaListener(topics = "telemetry.pose", groupId = "api-sse-broadcaster")

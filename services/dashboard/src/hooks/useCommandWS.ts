@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
+import { fetchCommandAck } from "@/services/api";
+import { CommandRecovery } from "@/lib/commandRecovery";
 import type { AckDto, CommandResult } from "@/types";
 
 interface UseCommandWSReturn {
@@ -24,43 +26,66 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [lastAck, setLastAck] = useState<AckDto | null>(null);
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
+  const recoveryRef = useRef(new CommandRecovery());
   const clientRef = useRef<Client | null>(null);
 
   useEffect(() => {
+    recoveryRef.current = new CommandRecovery();
     setIsConnected(false);
     setLastAck(null);
     setLastResult(null);
+    let active = true;
+    let request: AbortController | null = null;
     const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
     const client = new Client({
       webSocketFactory: () => new SockJS(`${apiBase}/ws`),
       reconnectDelay: 3000,
       onConnect: () => {
+        if (!active) return;
         setIsConnected(true);
 
         // 커맨드 전송 결과 구독 (해당 로봇 것만 반영)
         client.subscribe("/topic/cmd-result", (msg) => {
+          if (!active) return;
           try {
             const res = JSON.parse(msg.body) as CommandResult;
-            if (res.robotId === robotId) setLastResult(res);
+            if (res.robotId === robotId && recoveryRef.current.accepted(res)) setLastResult(res);
           } catch { /* 무시 */ }
         });
 
         // 해당 로봇의 Ack 구독
         client.subscribe(`/topic/ack/${robotId}`, (msg) => {
+          if (!active) return;
           try {
-            setLastAck(JSON.parse(msg.body) as AckDto);
+            const ack = JSON.parse(msg.body) as AckDto;
+            if (recoveryRef.current.apply(ack)) setLastAck(ack);
           } catch { /* 무시 */ }
         });
       },
-      onDisconnect: () => setIsConnected(false),
-      onWebSocketClose: () => setIsConnected(false),
-      onStompError: () => setIsConnected(false),
+      onDisconnect: () => { if (active) setIsConnected(false); },
+      onWebSocketClose: () => { if (active) setIsConnected(false); },
+      onStompError: () => { if (active) setIsConnected(false); },
     });
 
     client.activate();
     clientRef.current = client;
 
+    const recover = async () => {
+      const id = recoveryRef.current.pending();
+      if (!active || !id || request) return;
+      const current = new AbortController();
+      request = current;
+      try {
+        const ack = await fetchCommandAck(robotId, id, current.signal);
+        if (active && !current.signal.aborted && ack && recoveryRef.current.apply(ack)) setLastAck(ack);
+      } catch { /* DB 적재 지연과 일시 장애는 다음 조회에서 재시도한다. */ }
+      finally { if (request === current) request = null; }
+    };
+    const polling = setInterval(recover, 1000);
     return () => {
+      active = false;
+      clearInterval(polling);
+      request?.abort();
       client.deactivate();
       clientRef.current = null;
     };
@@ -83,6 +108,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
             issuedBy: "dashboard",
           }),
         });
+        recoveryRef.current.sent(requestId);
         return requestId;
       } catch {
         setIsConnected(false);

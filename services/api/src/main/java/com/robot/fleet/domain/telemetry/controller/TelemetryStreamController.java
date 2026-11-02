@@ -16,11 +16,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class TelemetryStreamController {
 
     private final TelemetryStreamService streamService;
+    private final com.robot.fleet.domain.realtime.RealtimeState realtime;
 
     // 클라이언트가 구독 시작: GET /api/stream/telemetry
     // 이후 robot_update SSE 이벤트로 실시간 텔레메트리 수신
     @GetMapping(value = "/telemetry", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamTelemetry() {
-        return streamService.createEmitter();
+        return realtime.whenAvailable(streamService::createEmitter);
     }
 }

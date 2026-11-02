@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { fetchRobots } from "@/services/api";
 import { useFleetStore } from "@/store/fleetStore";
 import type { TelemetryEvent } from "@/types";
 
@@ -14,16 +15,26 @@ export function useFleetSSE() {
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
+    let active = true;
+    let recovery: AbortController | null = null;
     const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
     const es = new EventSource(`${apiBase}/api/stream/telemetry`);
     esRef.current = es;
     setRealtimeState("connecting");
 
     es.onopen = () => {
+      if (!active) return;
       setRealtimeState("live");
+      recovery?.abort();
+      recovery = new AbortController();
+      const current = recovery;
+      fetchRobots(current.signal).then((robots) => {
+        if (active && !current.signal.aborted) useFleetStore.getState().initFromRest(robots);
+      }).catch(() => { /* 다음 재연결에서 스냅샷을 다시 조회한다. */ });
     };
 
     es.addEventListener("robot_update", (e: MessageEvent) => {
+      if (!active) return;
       try {
         const event: TelemetryEvent = JSON.parse(e.data);
         upsertFromSSE(event);
@@ -35,10 +46,14 @@ export function useFleetSSE() {
     });
 
     es.onerror = () => {
+      if (!active) return;
+      recovery?.abort();
       setRealtimeState("error", "SSE connection error");
     };
 
     return () => {
+      active = false;
+      recovery?.abort();
       es.close();
       esRef.current = null;
     };

@@ -1,4 +1,17 @@
 services:
+  redis:
+    image: redis:7.4-alpine
+    environment:
+      REDISCLI_AUTH: ${REALTIME_REDIS_PASSWORD:-dev_realtime_only}
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$${REDISCLI_AUTH}\""]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks: [robot_net]
+    restart: unless-stopped
+
   postgres:
     image: postgres:15-alpine
     container_name: robot_postgres
@@ -86,6 +99,8 @@ services:
       context: ../services/api
     container_name: robot_api
     depends_on:
+      redis:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       kafka-topic-init:
@@ -97,6 +112,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-telemetry}
       KAFKA_BROKER_URL: kafka:29092
+      REALTIME_RELAY_ENABLED: "true"
+      WEBSOCKET_PRESERVE_RECEIVE_ORDER: "true"
+      REALTIME_REDIS_HOST: redis
+      REALTIME_REDIS_PASSWORD: ${REALTIME_REDIS_PASSWORD:-dev_realtime_only}
       FLEET_ID: ${FLEET_ID:-default}
       SIMULATOR_INTERNAL_TOKEN: ${SIMULATOR_INTERNAL_TOKEN:?Set SIMULATOR_INTERNAL_TOKEN for API and ROS}
       SIMULATOR_MAX_ROBOTS: ${SIMULATOR_MAX_ROBOTS:-20}
@@ -164,12 +183,14 @@ services:
     build:
       context: ../services/dashboard
       args:
+        API_INTERNAL_URL: http://api:8080
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
     container_name: robot_dashboard
     depends_on:
       api:
         condition: service_healthy
     environment:
+      API_INTERNAL_URL: http://api:8080
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
     ports:
       - "${DASHBOARD_PORT:-3000}:3000"

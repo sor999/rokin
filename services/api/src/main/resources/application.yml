@@ -38,6 +38,11 @@ spring:
         partitioner.class: org.apache.kafka.clients.producer.internals.DefaultPartitioner
 
 fleet:
+  realtime:
+    enabled: ${REALTIME_RELAY_ENABLED:false}
+    host: ${REALTIME_REDIS_HOST:localhost}
+    port: ${REALTIME_REDIS_PORT:6379}
+    password: ${REALTIME_REDIS_PASSWORD:}
   id: ${FLEET_ID:default}
   websocket:
     preserve-receive-order: ${WEBSOCKET_PRESERVE_RECEIVE_ORDER:false}
@@ -54,6 +59,9 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,realtime
   metrics:
     tags:
       application: api-spring
