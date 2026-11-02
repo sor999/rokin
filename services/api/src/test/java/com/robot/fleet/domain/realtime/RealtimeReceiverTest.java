@@ -114,4 +114,35 @@ class RealtimeReceiverTest {
         assertThat(state.activate(0)).isFalse();
         assertThat(state.activate(1)).isTrue();
     }
+    @Test @DisplayName("준비 상태 변경과 무효화는 같은 monitor에서 직렬 처리한다")
+    void state_SerializesInvalidationWithActivation() throws Exception {
+        // given
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            java.util.concurrent.Future<Long> invalidation;
+            synchronized (state) {
+                state.activate(0);
+                invalidation = executor.submit(() -> { entered.countDown(); return state.invalidate(0); });
+                assertThat(entered.await(1, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                // when, then
+                assertThatThrownBy(() -> invalidation.get(50, java.util.concurrent.TimeUnit.MILLISECONDS))
+                        .isInstanceOf(java.util.concurrent.TimeoutException.class);
+            }
+            assertThat(invalidation.get(1, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1);
+            assertThat(state.available()).isFalse();
+            assertThat(state.activate(0)).isFalse();
+        }
+    }
+
+    @Test @DisplayName("status 길이 상한을 Kafka와 Redis에서 공통 검증한다")
+    void validation_BoundsStatusLength() {
+        // given
+        var data = mapper.createObjectNode();
+        // when, then
+        data.put("state", "a".repeat(RealtimeValidation.MAX_STATE_LENGTH));
+        assertThatCode(() -> RealtimeValidation.data("status", data)).doesNotThrowAnyException();
+        data.put("state", "a".repeat(RealtimeValidation.MAX_STATE_LENGTH + 1));
+        assertThatThrownBy(() -> RealtimeValidation.data("status", data)).isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

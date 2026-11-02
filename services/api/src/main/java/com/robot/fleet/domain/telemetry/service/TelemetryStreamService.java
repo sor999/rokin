@@ -131,7 +131,7 @@ public class TelemetryStreamService implements AutoCloseable {
                 full = queue.size() >= queueCapacity;
                 if (!full) { queue.put(key, data); notifyAll(); }
             }
-            if (full) finish(new IOException("SSE buffer full"));
+            if (full && data != null) finish(new IOException("SSE buffer full"));
         }
 
         private void write() {

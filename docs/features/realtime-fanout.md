@@ -20,7 +20,9 @@ local 모드이며 API 복제 운영에는 사용하지 않는다. 같은 Kafka 
 - 단절 시 기존 SSE와 WS를 닫고 로컬 online 캐시를 비운다. 준비 전 SSE와 명령 요청은 503으로 거부한다.
 - `/actuator/health/readiness`는 relay 상태를 포함한다. Redis 장애로 liveness를 실패시키지는 않는다.
 - 화면은 SSE 재접속 때 REST 로봇 목록을 다시 읽으며, 오래된 연결의 응답은 취소한다.
-- 자신이 보낸 requestId의 접수 응답으로 cmd_id를 확인한 명령만 1초 간격 REST 조회로 복구한다.
+- 자신이 보낸 requestId의 접수 응답으로 cmd_id를 확인한 모든 미종료 명령을 1초 간격 REST 조회로 복구한다.
+  새 명령을 보내도 이전 식별자를 유지한다. 요청별 REST 조회는 전송 후 5분까지이며, 이후 STOMP Ack는 계속 받는다.
+  미종료·미확인 요청 최대 100개를 추적하고 상한에서는 새 전송을 거부한다. 미확인 요청은 5분 뒤 정리한다.
   `GET /api/robots/{robotId}/acks/{cmdId}`는 아직 적재되지 않았으면 404, 값이 있으면 기존 Ack DTO를 반환한다.
   다른 Fleet의 등록 로봇 조회는 404다. Worker의 전이·적재 순서를 사용하며 이벤트 시각 역행으로 상태를 고르지 않는다.
 - 접수 응답을 못 받은 명령은 식별자를 추측하거나 이동을 재전송하지 않는다. 결과 미확인 상태에서 사용자가 판단한다.
@@ -31,13 +33,15 @@ Redis 단일 인스턴스는 개발 구성이다. 운영 HA·TLS와 최대 처�
 
 ## 제한과 후속 단계
 
-- Redis 수신 대기 1024건, 내부 메시지 최대 64Ki 문자, 중복 창은 10,000건/5분으로 제한한다.
-- SSE 기본 최대 1000개 전송 작업, 연결별 최대 32개의 대기 키, 전송 시간 상한 5초다.
+- status state 최대 256자(초과 입력 로그 후 거부), Redis 수신 대기 1024건, 내부 메시지 최대 64Ki 문자, 중복 창은 10,000건/5분으로 제한한다.
+- SSE 기본 최대 1000개 전송 작업, 연결별 최대 32개의 대기 키, 전송 경과 5초 뒤 종료를 요청한다. Tomcat NIO 소켓의 무진행 쓰기도 5초로 제한한다.
   같은 로봇·종류의 대기 관측은 최신 값으로 합친다. 정리 작업도 전송과 분리한다.
 - WebSocket 최대 1000연결, 전송 버퍼 64KiB/5초 및 outbound 실행 큐 256건으로 제한한다.
   Ack 경로가 포화되면 연결을 닫아 REST 복구를 유도한다. 지속 가능한 연결 수를 뜻하는 값은 아니다.
 - 모든 API의 정상 수신으로 로컬 온라인 캐시는 갱신되지만, 권위 있는 온라인 상태 공유는 2단계다.
-- runtime/삭제 fencing을 수신 노드에서도 확인하므로 API 수에 따라 DB 조회가 늘어난다. 3단계에서 최적화한다.
+- runtime/삭제 fencing을 수신 노드에서도 확인하므로 API 수에 따라 DB 조회가 늘어난다.
+  fence 조회 transaction deadline 1초, 풀 획득 1초, PostgreSQL connect/socket/cancel 제한 2/2/1초를 적용한다.
+  이 연결 제한은 API의 공통 DB 연결에 적용되며 느린 DB에서는 요청을 실패시켜 재시도·REST 복구를 유도한다. 3단계에서 최적화한다.
 
 ## 검증
 
@@ -108,3 +112,35 @@ python3 scripts/scalability/measure.py --mode dual --profile baseline --output t
 
 대규모 연결, 장기 장애, 실제 네트워크 분할과 운영 Redis HA는 이번 결과의 검증 범위에 포함되지 않는다.
 권위 있는 presence 공유인 2단계까지 마쳐야 다중 API 운영을 허용한다.
+
+### PR #36 리뷰 반영 검증
+
+- 준비 상태 활성화·무효화의 monitor 경합, heartbeat overflow, status 256자 경계와
+  Redis close 예외 뒤 세션 정리 테스트를 추가했다.
+- Tomcat NIO의 소켓 쓰기 제한을 적용하고 실제 TCP 클라이언트가 읽기를 멈춘 상태에서
+  writer 슬롯 회수 및 새 연결 허용을 검증했다. 슬롯을 먼저 반환해 막힌 작업을 누적시키지 않는다.
+  [Tomcat 10.1.52 구현](https://github.com/apache/tomcat/blob/10.1.52/java/org/apache/tomcat/util/net/NioEndpoint.java)의
+  connectionTimeout→writeTimeout 적용과 blocking write timeout을 근거로 사용한다.
+- fence transaction deadline은 별도 PostgreSQL 15의 임시 스키마와 pg_sleep(5) view를 사용해
+  서비스 proxy 호출에서 QueryTimeoutException으로 약 1.1초에 취소됨을 검증했다.
+  기존 삭제·runtime 차단 테스트를 유지하며 캐시는 도입하지 않았다.
+- API `test bootJar`: 57개 중 실패 0, 기존 PostgreSQL 마이그레이션 전용 3개 건너뜀.
+  새 PostgreSQL fence 테스트는 FENCE_TEST_URL 지정으로 실제 실행했다.
+- Dashboard: 여러 요청의 역순 응답·이전 명령 완료·5분 조회 기한·추적 상한을 포함한
+  테스트 17개와 typecheck, build 성공.
+- 측정기 일반 22개 중 실패 0(복구 통합 2개 기본 건너뜀). 별도 명시 실행한 복구 통합 2개 성공(30.4초).
+  API 중단 전 두 연결의 공통 이벤트 키 수신 검증도 추가했다.
+- 수정 API 이미지의 dual smoke: 로봇 3대, 연결 4개, 30초, 5건 모두 접수,
+  이벤트·최종 Ack 전달률 100%, 10개 기준 모두 통과. 원시 결과는
+  로컬 `tmp/scalability/review36-dual-smoke.json`에 보존한다.
+- 20연결/120초 비교 수치는 위의 최초 구현 검증 결과이며 리뷰 수정 후에는 smoke와
+  복구 테스트를 재실행했다. Worker·ROS 코드와 스키마는 변경하지 않았다.
+
+PostgreSQL deadline 테스트는 전용 테스트 DB에서 다음처럼 실행한다. 테스트가 자기 임시
+스키마를 생성·정리하므로 운영 DB를 지정하지 않는다.
+
+```bash
+FENCE_TEST_URL=jdbc:postgresql://localhost:25436/review36 \
+FENCE_TEST_USER=postgres FENCE_TEST_PASSWORD=rokin_test_only \
+services/api/gradlew -p services/api test --tests '*TelemetryFenceDeadlineTest' --rerun-tasks
+```

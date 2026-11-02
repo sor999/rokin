@@ -33,7 +33,7 @@ public class RealtimeState {
         return true;
     }
 
-    public long invalidate(long expected) {
+    public synchronized long invalidate(long expected) {
         if (!generation.compareAndSet(expected, expected + 1)) return -1;
         available.set(false);
         return expected + 1;

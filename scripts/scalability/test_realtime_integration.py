@@ -107,6 +107,7 @@ class RealtimeIntegrationTest(unittest.TestCase):
         cmd = self.stop_command(first)
         self.wait(lambda: self.ack_done(first, cmd) and self.ack_done(second, cmd), 5)
         self.wait(lambda: self.persisted(18082, cmd), 5)
+        self.wait(lambda: {key for key, _, _ in first.events} & {key for key, _, _ in second.events}, 15)
         try:
             self.docker('stop', '--time', '20', 'rokin-scale-lab-api-1')
             self.assertTrue(self.healthy(18082))

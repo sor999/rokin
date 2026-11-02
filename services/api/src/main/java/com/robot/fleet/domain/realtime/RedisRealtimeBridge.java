@@ -23,7 +23,7 @@ import java.util.concurrent.*;
 public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
     private record Connections(long generation, StatefulRedisConnection<String, String> publisher,
                                StatefulRedisPubSubConnection<String, String> subscriber) {
-        void close() { subscriber.close(); publisher.close(); }
+        void close() { try { subscriber.close(); } finally { publisher.close(); } }
     }
     private final RedisClient client;
     private final String channel;
@@ -98,12 +98,17 @@ public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
                         }
                         return;
                     }
-                    if (body.length() > 65536) { metrics.counter("fleet.realtime.invalid").increment(); return; }
+                    if (body.length() > 65536) {
+                        metrics.counter("fleet.realtime.invalid").increment();
+                        log.warn("Oversized realtime envelope rejected: {} characters", body.length());
+                        return;
+                    }
                     try {
                         delivery.execute(() -> {
                             try { receiver.receive(body, generation); }
                             catch (IllegalArgumentException | com.fasterxml.jackson.core.JsonProcessingException error) {
                                 metrics.counter("fleet.realtime.invalid").increment();
+                                log.warn("Invalid realtime envelope rejected: {}", error.getClass().getSimpleName());
                             } catch (Exception error) { invalidate(generation); }
                         });
                     } catch (RejectedExecutionException full) { invalidate(generation); }
@@ -131,9 +136,14 @@ public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
             maintenance.execute(() -> {
                 Connections old = connections;
                 connections = null;
-                if (old != null) old.close();
-                delivery.getQueue().clear();
-                state.cleanup(() -> { stream.reset(); sessions.reset(); });
+                try {
+                    if (old != null) old.close();
+                } catch (Exception error) {
+                    log.warn("Realtime connection close failed: {}", error.getClass().getSimpleName());
+                } finally {
+                    delivery.getQueue().clear();
+                    state.cleanup(() -> { stream.reset(); sessions.reset(); });
+                }
             });
         } catch (RejectedExecutionException stopping) { }
     }

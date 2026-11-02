@@ -1,12 +1,16 @@
 server:
   port: 8080
+  tomcat:
+    connection-timeout: 5s
 
 spring:
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:telemetry}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:telemetry}?connectTimeout=2&socketTimeout=2&cancelSignalTimeout=1
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 1000
 
   jpa:
     hibernate:

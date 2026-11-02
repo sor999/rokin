@@ -71,13 +71,20 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
     clientRef.current = client;
 
     const recover = async () => {
-      const id = recoveryRef.current.pending();
-      if (!active || !id || request) return;
+      const ids = recoveryRef.current.pending();
+      if (!active || !ids.length || request) return;
       const current = new AbortController();
       request = current;
       try {
-        const ack = await fetchCommandAck(robotId, id, current.signal);
-        if (active && !current.signal.aborted && ack && recoveryRef.current.apply(ack)) setLastAck(ack);
+        for (const id of ids) {
+          if (!active || current.signal.aborted) break;
+          if (!recoveryRef.current.pending().includes(id)) continue;
+          try {
+            const signal = AbortSignal.any([current.signal, AbortSignal.timeout(3000)]);
+            const ack = await fetchCommandAck(robotId, id, signal);
+            if (active && !current.signal.aborted && ack && recoveryRef.current.apply(ack)) setLastAck(ack);
+          } catch { /* 개별 명령의 실패가 다른 명령의 복구를 막지 않게 한다. */ }
+        }
       } catch { /* DB 적재 지연과 일시 장애는 다음 조회에서 재시도한다. */ }
       finally { if (request === current) request = null; }
     };
@@ -94,7 +101,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
   const sendCommand = useCallback(
     (rid: string, command: string, data: Record<string, unknown> = {}) => {
       const client = clientRef.current;
-      if (!client?.connected) return null;
+      if (!client?.connected || !recoveryRef.current.canSend()) return null;
 
       const requestId = crypto.randomUUID();
       try {

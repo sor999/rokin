@@ -52,6 +52,8 @@ class TelemetryStreamServiceTest {
             while (healthy.values.size() < 2 && System.nanoTime() < deadline) Thread.sleep(5);
             assertThat(healthy.values).hasSize(2);
             assertThat(metrics.get("fleet.sse.connections").gauge().value()).isEqualTo(1);
+            while (metrics.get("fleet.sse.writers").gauge().value() != 1 && System.nanoTime() < deadline) Thread.sleep(5);
+            assertThat(metrics.get("fleet.sse.writers").gauge().value()).isEqualTo(1);
         }
     }
 
@@ -94,4 +96,25 @@ class TelemetryStreamServiceTest {
             assertThat(slow.failed.await(2, TimeUnit.SECONDS)).isTrue();
         }
     }
+    @Test @DisplayName("가득 찬 대기열에서 heartbeat는 건너뛰고 관측 overflow는 종료한다")
+    void ping_DoesNotCloseFullTelemetryQueue() throws Exception {
+        // given
+        var metrics = new SimpleMeterRegistry();
+        try (var stream = new TelemetryStreamService(new ObjectMapper().findAndRegisterModules(), metrics)) {
+            ReflectionTestUtils.setField(stream, "queueCapacity", 1);
+            Emitter slow = new Emitter(true);
+            stream.registerEmitter(slow);
+            stream.broadcast(event("robot_1", 1));
+            assertThat(slow.entered.await(2, TimeUnit.SECONDS)).isTrue();
+            stream.broadcast(event("robot_2", 2));
+            // when
+            stream.sendPing();
+            // then
+            assertThat(metrics.get("fleet.sse.connections").gauge().value()).isEqualTo(1);
+            assertThat(metrics.get("fleet.sse.pending").gauge().value()).isEqualTo(1);
+            stream.broadcast(event("robot_3", 3));
+            assertThat(slow.failed.await(2, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
 }

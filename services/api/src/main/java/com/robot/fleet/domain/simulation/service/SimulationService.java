@@ -114,7 +114,7 @@ public class SimulationService implements ApplicationRunner {
         repository.registerRuntime(fleetId, runtimeId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, timeout = 1)
     public boolean acceptsTelemetry(String robotId, String runtimeId) {
         return repository.acceptsTelemetry(fleetId, robotId, runtimeId);
     }

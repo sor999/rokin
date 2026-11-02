@@ -3,6 +3,7 @@ package com.robot.fleet.domain.realtime;
 import com.fasterxml.jackson.databind.JsonNode;
 
 public final class RealtimeValidation {
+    public static final int MAX_STATE_LENGTH = 256;
     private RealtimeValidation() { }
     public static void data(String type, JsonNode data) {
         if (data == null || !data.isObject()) throw new IllegalArgumentException("Missing telemetry data");
@@ -14,7 +15,7 @@ public final class RealtimeValidation {
                 if (level < 0 || level > 100) throw new IllegalArgumentException("Invalid battery");
             }
             case "status" -> {
-                if (!data.path("state").isTextual() || data.path("state").asText().isBlank()) throw new IllegalArgumentException("Invalid state");
+                if (!data.path("state").isTextual() || (data.path("state").asText().isBlank() || data.path("state").asText().length() > MAX_STATE_LENGTH)) throw new IllegalArgumentException("Invalid state");
             }
             default -> throw new IllegalArgumentException("Invalid telemetry type");
         }

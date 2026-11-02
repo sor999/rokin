@@ -8,7 +8,7 @@ fake_robot -> ROS2 topics -> ros_kafka_bridge -> Kafka
                                               |-> api -> Redis pub/sub -> all APIs -> SSE/WebSocket -> dashboard
 
 dashboard -> STOMP command -> api -> cmd.robot -> ros_kafka_bridge
-               <- Ack/WebSocket <- api <- ack.robot <- fake_robot
+               <- Ack/WebSocket <- all APIs <- Redis pub/sub <- api <- ack.robot <- fake_robot
 ```
 
 각 런타임은 독립 배포 단위입니다. 서비스 사이에 소스 코드 의존성을 만들지 않고 Kafka,
