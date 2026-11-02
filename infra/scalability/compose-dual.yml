@@ -1,0 +1,5 @@
+services:
+  load-balancer:
+    depends_on:
+      api-b:
+        condition: service_healthy

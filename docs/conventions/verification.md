@@ -93,3 +93,11 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - ROS의 `test_managed_ros_integration.py`는 `ROS_KAFKA_TEST_BROKER`와 별도 DDS 도메인에서
   실제 관리 노드/HTTP/Kafka/ROS를 연결하고 한 로봇이 이동 중 다른 로봇을 추가·삭제한다.
 - [시나리오와 실행 설정](../features/simulator-management.md)에 따라 생성·정지·삭제·재시작을 확인한다.
+
+## 분산 확장성 기준선 검증
+
+- 측정기: `python3 -m unittest discover -s scripts/scalability -p 'test_*.py' -v`
+- 격리 Compose 설정: `scripts/scalability/lab.sh config single`, `scripts/scalability/lab.sh config dual`
+- 실제 ROS·API 1대/2대 비교와 판정 기준은 [0단계 실행 문서](../features/scalability-baseline.md)를 따른다.
+- 측정은 개발 DB·Kafka와 다른 `rokin-scale-lab` 프로젝트에서 수행하며 볼륨을 삭제하지 않는다.
+- 다중 API의 전달 결함을 기록한 기준선과 테스트 환경 자체의 실행 실패를 구분한다.

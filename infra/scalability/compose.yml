@@ -1,0 +1,71 @@
+services:
+  postgres:
+    container_name: !reset null
+    ports: !reset []
+    command: [postgres, -c, shared_preload_libraries=pg_stat_statements, -c, track_io_timing=on]
+    volumes:
+      - ./scalability/init.sql:/docker-entrypoint-initdb.d/10-scalability.sql:ro
+  zookeeper:
+    container_name: !reset null
+    ports: !reset []
+  kafka:
+    container_name: !reset null
+    ports: !reset []
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://kafka:29092
+  kafka-topic-init:
+    container_name: !reset null
+  api:
+    container_name: !reset null
+    environment:
+      WEBSOCKET_PRESERVE_RECEIVE_ORDER: "true"
+    ports: !override ["127.0.0.1:18081:8080"]
+  api-b:
+    extends:
+      file: docker-compose.yml
+      service: api
+    container_name: !reset null
+    environment:
+      WEBSOCKET_PRESERVE_RECEIVE_ORDER: "true"
+    profiles: [dual]
+    ports: !override ["127.0.0.1:18082:8080"]
+  worker:
+    container_name: !reset null
+    ports: !reset []
+  fake_robot:
+    container_name: !reset null
+    environment:
+      ROS_DOMAIN_ID: 83
+  dashboard:
+    container_name: !reset null
+    ports: !override ["127.0.0.1:13000:3000"]
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:18080
+        API_INTERNAL_URL: http://load-balancer:8080
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:18080
+      API_INTERNAL_URL: http://load-balancer:8080
+  postgres-exporter:
+    container_name: !reset null
+    ports: !reset []
+  kafka-exporter:
+    container_name: !reset null
+    ports: !reset []
+  prometheus:
+    container_name: !reset null
+    ports: !override ["127.0.0.1:19090:9090"]
+    volumes:
+      - ${SCALE_PROMETHEUS_CONFIG:?Use scripts/scalability/lab.sh}:/etc/prometheus/prometheus.yml:ro
+  grafana:
+    container_name: !reset null
+    ports: !override ["127.0.0.1:13001:3000"]
+  load-balancer:
+    image: nginx:1.28-alpine
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ${SCALE_NGINX_CONFIG:?Use scripts/scalability/lab.sh}:/etc/nginx/nginx.conf:ro
+    ports: ["127.0.0.1:18080:8080"]
+    networks: [robot_net]

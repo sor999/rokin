@@ -1,0 +1,5 @@
+{
+  "smoke": {"robots": 3, "clients": 4, "duration_seconds": 30, "command_interval_seconds": 5},
+  "baseline": {"robots": 3, "clients": 20, "duration_seconds": 120, "command_interval_seconds": 2},
+  "fleet10": {"robots": 10, "clients": 20, "duration_seconds": 120, "command_interval_seconds": 2}
+}
