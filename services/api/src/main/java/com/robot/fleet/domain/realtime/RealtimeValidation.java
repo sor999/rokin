@@ -3,6 +3,7 @@ package com.robot.fleet.domain.realtime;
 import com.fasterxml.jackson.databind.JsonNode;
 
 public final class RealtimeValidation {
+    public static final int MAX_ENVELOPE_LENGTH = 65536;
     public static final int MAX_STATE_LENGTH = 256;
     private RealtimeValidation() { }
     public static void data(String type, JsonNode data) {

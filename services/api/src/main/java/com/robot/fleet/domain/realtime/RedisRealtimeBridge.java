@@ -98,7 +98,7 @@ public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
                         }
                         return;
                     }
-                    if (body.length() > 65536) {
+                    if (body.length() > RealtimeValidation.MAX_ENVELOPE_LENGTH) {
                         metrics.counter("fleet.realtime.invalid").increment();
                         log.warn("Oversized realtime envelope rejected: {} characters", body.length());
                         return;
@@ -152,8 +152,17 @@ public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
         state.requireAvailable();
         Connections current = connections;
         if (current == null) throw new IllegalStateException("Realtime connection unavailable");
+        String data;
         try {
-            String data = mapper.writeValueAsString(new RealtimeReceiver.Envelope(1, fleetId, kind, id, mapper.valueToTree(payload)));
+            data = mapper.writeValueAsString(new RealtimeReceiver.Envelope(1, fleetId, kind, id, mapper.valueToTree(payload)));
+        } catch (Exception error) {
+            throw new IllegalArgumentException("Invalid realtime payload", error);
+        }
+        if (data.length() > RealtimeValidation.MAX_ENVELOPE_LENGTH) {
+            log.warn("Oversized outgoing realtime envelope rejected: {} characters", data.length());
+            throw new IllegalArgumentException("Realtime envelope exceeds size limit");
+        }
+        try {
             long subscribers = current.publisher().sync().publish(channel, data);
             if (subscribers < 1) throw new IllegalStateException("No realtime subscriber");
         } catch (Exception error) {

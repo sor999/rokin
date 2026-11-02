@@ -24,4 +24,20 @@ class RealtimeIngressTest {
         listener.handlePoseTelemetry("not json");
         verifyNoInteractions(publisher);
     }
+    @Test @DisplayName("Kafka status 인입은 상한을 초과한 state를 발행하지 않는다")
+    void status_RejectsOversizedState() {
+        var publisher = mock(RealtimePublisher.class);
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var simulations = mock(SimulationService.class);
+        when(simulations.acceptsTelemetry("robot_1", null)).thenReturn(true);
+        var listener = new TelemetryKafkaListener(publisher, mapper, simulations);
+        var json = mapper.createObjectNode();
+        json.put("event_id", java.util.UUID.randomUUID().toString());
+        json.put("robot_id", "robot_1");
+        json.put("timestamp", "2026-11-02T00:00:00Z");
+        json.putObject("data").put("state", "x".repeat(RealtimeValidation.MAX_STATE_LENGTH + 1));
+        listener.handleStatusTelemetry(json.toString());
+        verifyNoInteractions(publisher);
+    }
+
 }

@@ -71,7 +71,32 @@ test('미확인 요청과 미종료 명령의 추적 상한을 지키고 종료 
   now = 100;
   assert.equal(state.canSend(), true);
   assert.equal(state.sent('third'), true);
+  assert.equal(state.sent('fourth'), true);
   assert.equal(state.canSend(), false);
   state.apply(ack('a', 'done'));
+  now = 200;
+  assert.equal(state.canSend(), true);
+});
+
+test('종료를 놓친 명령이 상한까지 쌓여도 만료 후 전송 슬롯을 회수한다', () => {
+  let now = 0;
+  const state = tracker(() => now, 100, 2);
+  for (let i = 0; i < 2; i++) { state.sent('r' + i); state.accepted(result('r' + i, 'c' + i)); }
+  assert.equal(state.canSend(), false);
+  now = 100;
+  assert.equal(state.canSend(), true);
+  assert.equal(state.sent('new'), true);
+  assert.equal(state.apply(ack('c0', 'done')), true);
+  assert.equal(state.apply(ack('c0', 'accepted')), false);
+});
+test('만료된 Ack 이력도 상한을 지키고 최근 이력만 지연 수신한다', () => {
+  let now = 0;
+  const state = tracker(() => now, 100, 2);
+  for (let i = 0; i < 5; i++) {
+    state.sent('r' + i); state.accepted(result('r' + i, 'c' + i));
+    now += 100; state.pending();
+  }
+  assert.equal(state.apply(ack('c0', 'done')), false);
+  assert.equal(state.apply(ack('c4', 'done')), true);
   assert.equal(state.canSend(), true);
 });

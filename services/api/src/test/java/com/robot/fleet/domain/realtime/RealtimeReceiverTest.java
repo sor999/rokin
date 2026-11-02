@@ -134,7 +134,7 @@ class RealtimeReceiverTest {
         }
     }
 
-    @Test @DisplayName("status 길이 상한을 Kafka와 Redis에서 공통 검증한다")
+    @Test @DisplayName("status 검증기의 길이 경계를 확인한다")
     void validation_BoundsStatusLength() {
         // given
         var data = mapper.createObjectNode();
@@ -143,6 +143,24 @@ class RealtimeReceiverTest {
         assertThatCode(() -> RealtimeValidation.data("status", data)).doesNotThrowAnyException();
         data.put("state", "a".repeat(RealtimeValidation.MAX_STATE_LENGTH + 1));
         assertThatThrownBy(() -> RealtimeValidation.data("status", data)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test @DisplayName("Redis status 인입도 상한을 초과한 state를 전송하지 않는다")
+    void receive_RejectsOversizedStatus() throws Exception {
+        state.activate(0);
+        var status = StatusTelemetryDto.of("robot_1", OffsetDateTime.now(), "x".repeat(RealtimeValidation.MAX_STATE_LENGTH + 1));
+        String encoded = telemetry(UUID.randomUUID().toString(), "default", status);
+        assertThatThrownBy(() -> receiver.receive(encoded, 0)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(stream, messaging);
+    }
+
+    @Test @DisplayName("환경 변수 없이도 fence deadline의 트랜잭션 계약을 검증한다")
+    void fence_DeclaresReadOnlyDeadline() throws Exception {
+        var attribute = new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()
+                .getTransactionAttribute(SimulationService.class.getMethod("acceptsTelemetry", String.class, String.class), SimulationService.class);
+        assertThat(attribute).isNotNull();
+        assertThat(attribute.isReadOnly()).isTrue();
+        assertThat(attribute.getTimeout()).isEqualTo(1);
     }
 
 }

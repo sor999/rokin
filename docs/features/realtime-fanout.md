@@ -21,8 +21,10 @@ local 모드이며 API 복제 운영에는 사용하지 않는다. 같은 Kafka 
 - `/actuator/health/readiness`는 relay 상태를 포함한다. Redis 장애로 liveness를 실패시키지는 않는다.
 - 화면은 SSE 재접속 때 REST 로봇 목록을 다시 읽으며, 오래된 연결의 응답은 취소한다.
 - 자신이 보낸 requestId의 접수 응답으로 cmd_id를 확인한 모든 미종료 명령을 1초 간격 REST 조회로 복구한다.
-  새 명령을 보내도 이전 식별자를 유지한다. 요청별 REST 조회는 전송 후 5분까지이며, 이후 STOMP Ack는 계속 받는다.
-  미종료·미확인 요청 최대 100개를 추적하고 상한에서는 새 전송을 거부한다. 미확인 요청은 5분 뒤 정리한다.
+  새 명령을 보내도 이전 식별자를 유지한다. 요청별 REST 조회는 전송 후 5분까지이며 최대 4개씩 병렬 실행한다.
+  만료 시 전송 슬롯을 회수하고 최근 100개 만료 명령의 STOMP Ack만 추가 수신한다.
+  더 오래된 만료 이력은 제거하며 결과 미확인으로 남긴다.
+  미종료·미확인 요청 최대 100개를 추적하고 상한에서는 새 전송을 거부한다. 미확인 요청과 접수된 명령 모두 5분 뒤 전송 슬롯을 반환한다.
   `GET /api/robots/{robotId}/acks/{cmdId}`는 아직 적재되지 않았으면 404, 값이 있으면 기존 Ack DTO를 반환한다.
   다른 Fleet의 등록 로봇 조회는 404다. Worker의 전이·적재 순서를 사용하며 이벤트 시각 역행으로 상태를 고르지 않는다.
 - 접수 응답을 못 받은 명령은 식별자를 추측하거나 이동을 재전송하지 않는다. 결과 미확인 상태에서 사용자가 판단한다.
@@ -33,7 +35,7 @@ Redis 단일 인스턴스는 개발 구성이다. 운영 HA·TLS와 최대 처�
 
 ## 제한과 후속 단계
 
-- status state 최대 256자(초과 입력 로그 후 거부), Redis 수신 대기 1024건, 내부 메시지 최대 64Ki 문자, 중복 창은 10,000건/5분으로 제한한다.
+- status state 최대 256자(초과 입력 로그 후 거부), Redis 발행·수신 대기 1024건, 내부 메시지 최대 64Ki 문자, 중복 창은 10,000건/5분으로 제한한다.
 - SSE 기본 최대 1000개 전송 작업, 연결별 최대 32개의 대기 키, 전송 경과 5초 뒤 종료를 요청한다. Tomcat NIO 소켓의 무진행 쓰기도 5초로 제한한다.
   같은 로봇·종류의 대기 관측은 최신 값으로 합친다. 정리 작업도 전송과 분리한다.
 - WebSocket 최대 1000연결, 전송 버퍼 64KiB/5초 및 outbound 실행 큐 256건으로 제한한다.
@@ -41,7 +43,8 @@ Redis 단일 인스턴스는 개발 구성이다. 운영 HA·TLS와 최대 처�
 - 모든 API의 정상 수신으로 로컬 온라인 캐시는 갱신되지만, 권위 있는 온라인 상태 공유는 2단계다.
 - runtime/삭제 fencing을 수신 노드에서도 확인하므로 API 수에 따라 DB 조회가 늘어난다.
   fence 조회 transaction deadline 1초, 풀 획득 1초, PostgreSQL connect/socket/cancel 제한 2/2/1초를 적용한다.
-  이 연결 제한은 API의 공통 DB 연결에 적용되며 느린 DB에서는 요청을 실패시켜 재시도·REST 복구를 유도한다. 3단계에서 최적화한다.
+  Flyway는 별도 URL로 소켓 읽기 제한을 제외해 긴 마이그레이션을 허용한다.
+  이 연결 제한은 API의 일반 DB 연결에 적용되며 느린 DB에서는 요청을 실패시켜 재시도·REST 복구를 유도한다. 3단계에서 최적화한다.
 
 ## 검증
 
@@ -144,3 +147,20 @@ FENCE_TEST_URL=jdbc:postgresql://localhost:25436/review36 \
 FENCE_TEST_USER=postgres FENCE_TEST_PASSWORD=rokin_test_only \
 services/api/gradlew -p services/api test --tests '*TelemetryFenceDeadlineTest' --rerun-tasks
 ```
+
+### 재검토 후 병합 전 검증
+
+- Flyway URL·인증을 일반 DataSource와 분리하고 socketTimeout은 제외했다.
+  별도 PostgreSQL에서 Flyway initSql의 pg_sleep(3)이 읽기 제한으로 끊기지 않고 완료됨을 확인했다.
+- 만료된 명령은 5분 뒤 전송 슬롯을 반환하고 지연 Ack용 최근 100개 이력으로 옮긴다.
+  100개 미종료 명령의 만료·슬롯 회수와 만료 이력의 상한을 테스트했다.
+- Ack 복구는 최대 4개 동시 조회를 사용한다. 앞선 조회 실패·지연에도 100개 모두 조회하며,
+  연결 종료 뒤 새 조회나 늦은 상태 반영이 없음을 검증했다.
+- 발행·수신 envelope은 같은 65,536자 상한을 사용한다. 발행 경계에서 정상 Ack는 전송하고,
+  한 글자 초과 Ack는 Redis 전송 전에 명시적으로 거부하며 정상 relay 연결은 유지한다.
+- Kafka·Redis status 인입의 길이 초과, 기본 실행의 fence deadline 선언,
+  Redis close 실패 시 대기 delivery 작업 정리 검증을 보강했다.
+- API test bootJar: 63개 중 실패 0, 기존 마이그레이션 전용 3개 건너뜀.
+  PostgreSQL fence 취소와 Flyway 장기 응답 테스트는 실제 실행했다.
+- Dashboard: 21개 테스트 및 typecheck·build 성공.
+- 수정 이미지의 API 2대 기동 성공. API·Redis 재시작 복구 통합 2개 성공(47.0초).

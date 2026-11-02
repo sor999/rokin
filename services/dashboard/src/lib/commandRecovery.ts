@@ -8,14 +8,21 @@ type TrackedRequest = {
 
 export class CommandRecovery {
   private readonly requests = new Map<string, TrackedRequest>();
+  private readonly expired = new Map<string, string | null>();
 
   constructor(private readonly now = Date.now, private readonly pollingMillis = 300000,
               private readonly maximum = 100) {}
 
-  canSend(): boolean {
+  private retireExpired() {
     for (const [id, request] of this.requests) {
-      if (!request.cmdId && this.now() >= request.deadline) this.requests.delete(id);
+      if (this.now() < request.deadline) continue;
+      if (request.cmdId) this.expired.set(request.cmdId, request.lastStatus);
+      this.requests.delete(id);
     }
+    while (this.expired.size > this.maximum) this.expired.delete(this.expired.keys().next().value!);
+  }
+  canSend(): boolean {
+    this.retireExpired();
     return this.requests.size < this.maximum;
   }
   sent(requestId: string) {
@@ -31,10 +38,12 @@ export class CommandRecovery {
     return true;
   }
   pending(): string[] {
+    this.retireExpired();
     return [...this.requests.values()].filter((request) => request.cmdId && this.now() < request.deadline)
       .map((request) => request.cmdId!);
   }
   apply(ack: AckDto): boolean {
+    this.retireExpired();
     for (const [id, request] of this.requests) {
       if (!request.cmdId || request.cmdId !== ack.cmdId) continue;
       if (ack.status === request.lastStatus) return false;
@@ -42,6 +51,9 @@ export class CommandRecovery {
       if (ack.status === "done" || ack.status === "failed") this.requests.delete(id);
       return true;
     }
-    return false;
+    if (!this.expired.has(ack.cmdId) || this.expired.get(ack.cmdId) === ack.status) return false;
+    if (ack.status === "done" || ack.status === "failed") this.expired.delete(ack.cmdId);
+    else this.expired.set(ack.cmdId, ack.status);
+    return true;
   }
 }

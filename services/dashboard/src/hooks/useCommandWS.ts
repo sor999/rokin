@@ -5,6 +5,7 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { fetchCommandAck } from "@/services/api";
 import { CommandRecovery } from "@/lib/commandRecovery";
+import { pollCommandAcks } from "@/lib/pollCommandAcks";
 import type { AckDto, CommandResult } from "@/types";
 
 interface UseCommandWSReturn {
@@ -76,15 +77,9 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
       const current = new AbortController();
       request = current;
       try {
-        for (const id of ids) {
-          if (!active || current.signal.aborted) break;
-          if (!recoveryRef.current.pending().includes(id)) continue;
-          try {
-            const signal = AbortSignal.any([current.signal, AbortSignal.timeout(3000)]);
-            const ack = await fetchCommandAck(robotId, id, signal);
-            if (active && !current.signal.aborted && ack && recoveryRef.current.apply(ack)) setLastAck(ack);
-          } catch { /* 개별 명령의 실패가 다른 명령의 복구를 막지 않게 한다. */ }
-        }
+        await pollCommandAcks(recoveryRef.current,
+          (id, signal) => fetchCommandAck(robotId, id, signal),
+          (ack) => { if (active) setLastAck(ack); }, current.signal);
       } catch { /* DB 적재 지연과 일시 장애는 다음 조회에서 재시도한다. */ }
       finally { if (request === current) request = null; }
     };
