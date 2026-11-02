@@ -246,6 +246,11 @@ def verify_lab(mode):
 
 
 QUERIES = {
+    'realtime_available': 'fleet_realtime_available',
+    'realtime_pending': 'fleet_realtime_pending',
+    'sse_pending': 'fleet_sse_pending',
+    'sse_writers': 'fleet_sse_writers',
+    'realtime_resets': 'fleet_realtime_resets_total',
     'kafka_lag': 'kafka_consumergroup_lag',
     'worker_buffer': 'worker_batch_buffer_depth',
     'worker_memory_bytes': 'process_resident_memory_bytes{job="worker-go"}',

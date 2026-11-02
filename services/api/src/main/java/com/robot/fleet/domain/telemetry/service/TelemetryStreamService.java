@@ -2,111 +2,170 @@ package com.robot.fleet.domain.telemetry.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.domain.telemetry.dto.TelemetryEvent;
-import lombok.extern.slf4j.Slf4j;
-
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.DistributionSummary;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.*;
+import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
-@Slf4j
 @Service
-public class TelemetryStreamService {
-
-    private final ObjectMapper objectMapper;
-    private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+public class TelemetryStreamService implements AutoCloseable {
+    private final ObjectMapper mapper;
+    private final Set<Connection> connections = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> runtimeIds = new ConcurrentHashMap<>();
+    private final Map<String, OffsetDateTime> lastSeenMap = new ConcurrentHashMap<>();
     private final Counter broadcastCounter;
     private final Counter sendFailureCounter;
-    private final DistributionSummary eventLagSeconds;
+    private final DistributionSummary lag;
+    private final ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(
+            r -> Thread.ofPlatform().daemon().name("sse-watchdog").unstarted(r));
+    private final AtomicBoolean stopped = new AtomicBoolean();
+    private final AtomicBoolean monitoring = new AtomicBoolean();
+    private final AtomicInteger writers = new AtomicInteger();
+    @Value("${fleet.sse.max-connections:1000}") private int maxConnections = 1000;
+    @Value("${fleet.sse.queue-capacity:32}") private int queueCapacity = 32;
+    @Value("${fleet.sse.send-timeout-ms:5000}") private long sendTimeoutMs = 5000;
 
-    // 로봇별 마지막 수신 시각 (Offline 탐지용)
-    private final Map<String, String> runtimeIds = new ConcurrentHashMap<>();
+    public TelemetryStreamService(ObjectMapper mapper, MeterRegistry metrics) {
+        this.mapper = mapper;
+        broadcastCounter = metrics.counter("fleet.sse.broadcast");
+        sendFailureCounter = metrics.counter("fleet.sse.send.failures");
+        lag = DistributionSummary.builder("fleet.sse.event.lag").baseUnit("seconds")
+                .publishPercentileHistogram().register(metrics);
+        Gauge.builder("fleet.sse.connections", connections, Set::size).register(metrics);
+        Gauge.builder("fleet.sse.writers", writers, AtomicInteger::get).register(metrics);
+        Gauge.builder("fleet.sse.pending", connections,
+                set -> set.stream().mapToInt(Connection::pending).sum()).register(metrics);
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void validateLimits() {
+        if (maxConnections < 1 || queueCapacity < 1 || sendTimeoutMs < 1) throw new IllegalArgumentException("Invalid SSE limits");
+    }
 
     public String getRuntimeId(String robotId) { return runtimeIds.get(robotId); }
+    public Map<String, OffsetDateTime> getLastSeenMap() { return lastSeenMap; }
 
-    private final Map<String, OffsetDateTime> lastSeenMap = new ConcurrentHashMap<>();
+    public SseEmitter createEmitter() { return registerEmitter(new SseEmitter(0L)); }
 
-    public TelemetryStreamService(ObjectMapper objectMapper, MeterRegistry meterRegistry) {
-        this.objectMapper = objectMapper;
-        this.broadcastCounter = meterRegistry.counter("fleet.sse.broadcast");
-        this.sendFailureCounter = meterRegistry.counter("fleet.sse.send.failures");
-        this.eventLagSeconds = DistributionSummary.builder("fleet.sse.event.lag")
-                .baseUnit("seconds")
-                .publishPercentileHistogram()
-                .register(meterRegistry);
-        Gauge.builder("fleet.sse.connections", emitters, List::size)
-                .register(meterRegistry);
-    }
-
-    public Map<String, OffsetDateTime> getLastSeenMap() {
-        return lastSeenMap;
-    }
-
-    public SseEmitter createEmitter() {
-        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
-        emitters.add(emitter);
-        emitter.onCompletion(() -> emitters.remove(emitter));
-        emitter.onTimeout(() -> emitters.remove(emitter));
-        emitter.onError(e -> emitters.remove(emitter));
-        log.info("[SSE] 클라이언트 연결 | 현재 구독자: {}", emitters.size());
+    synchronized SseEmitter registerEmitter(SseEmitter emitter) {
+        if (stopped.get() || writers.get() >= maxConnections) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "실시간 연결 상한에 도달했습니다.");
+        }
+        if (monitoring.compareAndSet(false, true)) watchdog.scheduleAtFixedRate(this::checkSlowConnections, 100, 100, TimeUnit.MILLISECONDS);
+        Connection connection = new Connection(emitter);
+        writers.incrementAndGet();
+        connections.add(connection);
+        emitter.onCompletion(() -> connection.finish(null));
+        emitter.onTimeout(() -> connection.finish(new IOException("SSE timeout")));
+        emitter.onError(connection::finish);
+        connection.worker = Thread.ofVirtual().name("sse-writer").unstarted(connection::write);
+        connection.worker.start();
         return emitter;
     }
 
     public void broadcast(TelemetryEvent event) {
         if (event.occurredAt() == null) throw new IllegalArgumentException("Telemetry timestamp is required");
         if (!event.type().equals("offline")) {
-            lastSeenMap.compute(event.robotId(), (id, previous) -> {
-                if (event.runtimeId() == null) runtimeIds.remove(id);
-                else runtimeIds.put(id, event.runtimeId());
-                return OffsetDateTime.now();
-            });
+            if (event.runtimeId() == null) runtimeIds.remove(event.robotId());
+            else runtimeIds.put(event.robotId(), event.runtimeId());
+            lastSeenMap.put(event.robotId(), OffsetDateTime.now());
         }
-        broadcastCounter.increment();
-        long eventLagMillis = Duration.between(event.occurredAt(), OffsetDateTime.now()).toMillis();
-        eventLagSeconds.record(Math.max(eventLagMillis, 0) / 1000.0);
         String data;
-        try {
-            data = objectMapper.writeValueAsString(event);
-        } catch (Exception e) {
-            log.warn("[SSE] broadcast 직렬화 실패: {}", e.getMessage());
-            return; // 직렬화 실패 시 예외 전파 없이 해당 브로드캐스트만 중단
-        }
-        
-        List<SseEmitter> dead = new ArrayList<>();
-        for (SseEmitter emitter : emitters) {
-            try {
-                emitter.send(SseEmitter.event().name("robot_update").data(data));
-            } catch (Exception e) {
-                sendFailureCounter.increment();
-                dead.add(emitter);
-            }
-        }
-        emitters.removeAll(dead);
+        try { data = mapper.writeValueAsString(event); }
+        catch (Exception error) { throw new IllegalArgumentException("Invalid telemetry", error); }
+        broadcastCounter.increment();
+        lag.record(Math.max(0, Duration.between(event.occurredAt(), OffsetDateTime.now()).toMillis()) / 1000.0);
+        String key = event.robotId() + ":" + event.type();
+        for (Connection connection : connections) connection.offer(key, data);
     }
 
     @Scheduled(fixedRateString = "${fleet.sse-ping-ms:15000}")
     public void sendPing() {
-        if (emitters.isEmpty()) return;
-        List<SseEmitter> dead = new ArrayList<>();
-        for (SseEmitter emitter : emitters) {
-            try {
-                emitter.send(SseEmitter.event().comment("ping"));
-            } catch (Exception e) {
-                sendFailureCounter.increment();
-                dead.add(emitter);
-            }
+        for (Connection connection : connections) connection.offer("ping", null);
+    }
+
+    private void checkSlowConnections() {
+        long limit = TimeUnit.MILLISECONDS.toNanos(sendTimeoutMs);
+        long now = System.nanoTime();
+        for (Connection connection : connections) {
+            long sending = connection.sendingSince;
+            if (sending != 0 && now - sending > limit) connection.finish(new IOException("Slow SSE client"));
         }
-        emitters.removeAll(dead);
+    }
+
+    public void reset() {
+        lastSeenMap.clear();
+        runtimeIds.clear();
+        for (Connection connection : connections) connection.finish(new IOException("Realtime connection reset"));
+    }
+
+    @PreDestroy public void close() { stopped.set(true); reset(); watchdog.shutdownNow(); }
+
+    private final class Connection {
+        private final SseEmitter emitter;
+        private final LinkedHashMap<String, String> queue = new LinkedHashMap<>();
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicInteger tasks = new AtomicInteger(2);
+        private volatile long sendingSince;
+        private volatile Thread worker;
+
+        private Connection(SseEmitter emitter) { this.emitter = emitter; }
+        private synchronized int pending() { return queue.size(); }
+
+        private void offer(String key, String data) {
+            boolean full;
+            synchronized (this) {
+                if (closed.get()) return;
+                queue.remove(key);
+                full = queue.size() >= queueCapacity;
+                if (!full) { queue.put(key, data); notifyAll(); }
+            }
+            if (full && data != null) finish(new IOException("SSE buffer full"));
+        }
+
+        private void write() {
+            try {
+                while (!closed.get()) {
+                    String data;
+                    synchronized (this) {
+                        while (queue.isEmpty() && !closed.get()) wait();
+                        if (closed.get()) return;
+                        var entry = queue.entrySet().iterator();
+                        data = entry.next().getValue();
+                        entry.remove();
+                    }
+                    sendingSince = System.nanoTime();
+                    try {
+                        emitter.send(data == null ? SseEmitter.event().comment("ping") : SseEmitter.event().name("robot_update").data(data));
+                    } finally { sendingSince = 0; }
+                }
+            } catch (Exception error) { finish(error); }
+            finally { taskFinished(); }
+        }
+
+        private void taskFinished() { if (tasks.decrementAndGet() == 0) writers.decrementAndGet(); }
+
+        private void finish(Throwable error) {
+            if (!closed.compareAndSet(false, true)) return;
+            connections.remove(this);
+            synchronized (this) { queue.clear(); notifyAll(); }
+            Thread task = worker;
+            if (task != null && task != Thread.currentThread()) task.interrupt();
+            if (error != null) sendFailureCounter.increment();
+            Thread.ofVirtual().name("sse-close").start(() -> {
+                try { emitter.complete(); } finally { taskFinished(); }
+            });
+        }
     }
 }

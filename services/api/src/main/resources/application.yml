@@ -1,12 +1,16 @@
 server:
   port: 8080
+  tomcat:
+    connection-timeout: 5s
 
 spring:
   datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:telemetry}
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:telemetry}?connectTimeout=2&socketTimeout=2&cancelSignalTimeout=1
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 1000
 
   jpa:
     hibernate:
@@ -19,6 +23,9 @@ spring:
 
   flyway:
     enabled: true
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:telemetry}?connectTimeout=2&cancelSignalTimeout=1
+    user: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
     locations: classpath:db/migration
     baseline-on-migrate: true
     postgresql:
@@ -38,6 +45,11 @@ spring:
         partitioner.class: org.apache.kafka.clients.producer.internals.DefaultPartitioner
 
 fleet:
+  realtime:
+    enabled: ${REALTIME_RELAY_ENABLED:false}
+    host: ${REALTIME_REDIS_HOST:localhost}
+    port: ${REALTIME_REDIS_PORT:6379}
+    password: ${REALTIME_REDIS_PASSWORD:}
   id: ${FLEET_ID:default}
   websocket:
     preserve-receive-order: ${WEBSOCKET_PRESERVE_RECEIVE_ORDER:false}
@@ -54,6 +66,9 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,realtime
   metrics:
     tags:
       application: api-spring

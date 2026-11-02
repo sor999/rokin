@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
  * Kafka battery 텔레메트리 메시지.
  */
 public record BatteryTelemetryMessageDto(
+        @JsonProperty("event_id") String eventId,
         String type,
         @JsonProperty("robot_id")
         String robotId,

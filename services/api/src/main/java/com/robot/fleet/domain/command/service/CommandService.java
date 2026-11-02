@@ -1,6 +1,7 @@
 package com.robot.fleet.domain.command.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.robot.fleet.domain.realtime.RealtimeState;
 import com.robot.fleet.domain.command.dto.CommandRequestDto;
 import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
@@ -20,12 +21,14 @@ public class CommandService {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
+    private final RealtimeState realtime;
     private final String fleetId;
     private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
 
     public CommandService(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper,
                           @Value("${fleet.id:default}") String fleetId,
-                          com.robot.fleet.domain.simulation.service.SimulationService simulations) {
+                          com.robot.fleet.domain.simulation.service.SimulationService simulations,
+                          RealtimeState realtime) {
         if (fleetId == null || !fleetId.matches("[A-Za-z0-9_-]{1,128}")) {
             throw new IllegalArgumentException("Invalid fleet.id");
         }
@@ -33,9 +36,11 @@ public class CommandService {
         this.objectMapper = objectMapper;
         this.fleetId = fleetId;
         this.simulations = simulations;
+        this.realtime = realtime;
     }
 
     public String sendCommand(CommandRequestDto request) {
+        realtime.requireAvailable();
         Map<String, Object> context = simulations.commandContext(request.getRobotId());
         String cmdId = UUID.randomUUID().toString();
         try {

@@ -101,3 +101,10 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - 실제 ROS·API 1대/2대 비교와 판정 기준은 [0단계 실행 문서](../features/scalability-baseline.md)를 따른다.
 - 측정은 개발 DB·Kafka와 다른 `rokin-scale-lab` 프로젝트에서 수행하며 볼륨을 삭제하지 않는다.
 - 다중 API의 전달 결함을 기록한 기준선과 테스트 환경 자체의 실행 실패를 구분한다.
+
+## 실시간 fan-out 검증
+
+- API: RealtimeReceiverTest, TelemetryStreamServiceTest, RealtimeIngressTest와 AckQueryServiceTest로 전달·fencing·버퍼·복구 API를 검증한다.
+- Dashboard: commandRecovery와 fleetRecovery 테스트로 알려진 요청의 복구와 이전 연결 응답 차단을 검증한다.
+- 격리 환경의 API 재시작·Redis 단절 검증은 [실시간 전달 문서](../features/realtime-fanout.md)를 따른다.
+- `RUN_REALTIME_INTEGRATION=1`에서만 Docker 정지·재시작을 수행하며 일반 Python 테스트에서는 건너뛴다.

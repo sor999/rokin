@@ -5,10 +5,10 @@
 ```text
 fake_robot -> ROS2 topics -> ros_kafka_bridge -> Kafka
                                               |-> worker -> PostgreSQL
-                                              |-> api -> SSE/WebSocket -> dashboard
+                                              |-> api -> Redis pub/sub -> all APIs -> SSE/WebSocket -> dashboard
 
 dashboard -> STOMP command -> api -> cmd.robot -> ros_kafka_bridge
-               <- Ack/WebSocket <- api <- ack.robot <- fake_robot
+               <- Ack/WebSocket <- all APIs <- Redis pub/sub <- api <- ack.robot <- fake_robot
 ```
 
 각 런타임은 독립 배포 단위입니다. 서비스 사이에 소스 코드 의존성을 만들지 않고 Kafka,
@@ -67,3 +67,11 @@ Dashboard의 등록·삭제는 API의 DB 실행 의도를 변경한다. ROS 관�
 로봇과 Bridge 연결을 수렴시킨다. 정적 모드와의 소유권 구분 및 재시작 계약은
 [ADR 0004](docs/decisions/0004-managed-simulations.md), 실행 설정과 검증 시나리오는
 [가상 로봇 관리](docs/features/simulator-management.md)를 따른다.
+
+## API 간 실시간 전달
+
+Compose의 API는 Kafka 소비 후 Redis Fleet 채널을 통해 모든 연결 서버에 관측·Ack를 전달한다.
+STOMP SimpleBroker는 로컬 연결에만 전송하는 말단이며 API 간 전달은 Redis가 담당한다.
+단절 시 연결을 닫고, 재접속한 화면은 REST로 현재 상태와 알려진 명령의 Ack를 복구한다.
+경로·버퍼·복구 의미는 [ADR 0005](docs/decisions/0005-realtime-fanout.md)와
+[실행·검증 문서](docs/features/realtime-fanout.md)를 따른다.
