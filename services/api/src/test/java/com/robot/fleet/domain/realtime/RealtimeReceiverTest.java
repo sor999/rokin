@@ -16,13 +16,14 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RealtimeReceiverTest {
-    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules()
+            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final SimulationService simulations = mock(SimulationService.class);
     private final TelemetryStreamService stream = mock(TelemetryStreamService.class);
     private final SimpMessagingTemplate messaging = mock(SimpMessagingTemplate.class);
     private final RealtimeState state = new RealtimeState(true);
     private final RealtimeReceiver receiver = new RealtimeReceiver("default", mapper, simulations, stream, messaging, state);
-    private final PoseTelemetryDto pose = new PoseTelemetryDto("pose", "robot_1", OffsetDateTime.now(java.time.ZoneOffset.UTC), "current", new PoseTelemetryDataDto(1, 2));
+    private final PoseTelemetryDto pose = new PoseTelemetryDto("pose", "robot_1", OffsetDateTime.parse("2026-11-03T00:00:00.123456789Z"), "current", new PoseTelemetryDataDto(1, 2));
 
     private String telemetry(String id, String fleet, Object data) throws Exception {
         return mapper.writeValueAsString(new RealtimeReceiver.Envelope(1, fleet, "telemetry", id, mapper.valueToTree(data)));
