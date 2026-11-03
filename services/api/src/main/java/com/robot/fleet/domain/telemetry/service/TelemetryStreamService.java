@@ -21,8 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TelemetryStreamService implements AutoCloseable {
     private final ObjectMapper mapper;
     private final Set<Connection> connections = ConcurrentHashMap.newKeySet();
-    private final Map<String, String> runtimeIds = new ConcurrentHashMap<>();
-    private final Map<String, OffsetDateTime> lastSeenMap = new ConcurrentHashMap<>();
     private final Counter broadcastCounter;
     private final Counter sendFailureCounter;
     private final DistributionSummary lag;
@@ -52,9 +50,6 @@ public class TelemetryStreamService implements AutoCloseable {
         if (maxConnections < 1 || queueCapacity < 1 || sendTimeoutMs < 1) throw new IllegalArgumentException("Invalid SSE limits");
     }
 
-    public String getRuntimeId(String robotId) { return runtimeIds.get(robotId); }
-    public Map<String, OffsetDateTime> getLastSeenMap() { return lastSeenMap; }
-
     public SseEmitter createEmitter() { return registerEmitter(new SseEmitter(0L)); }
 
     synchronized SseEmitter registerEmitter(SseEmitter emitter) {
@@ -76,11 +71,6 @@ public class TelemetryStreamService implements AutoCloseable {
 
     public void broadcast(TelemetryEvent event) {
         if (event.occurredAt() == null) throw new IllegalArgumentException("Telemetry timestamp is required");
-        if (!event.type().equals("offline")) {
-            if (event.runtimeId() == null) runtimeIds.remove(event.robotId());
-            else runtimeIds.put(event.robotId(), event.runtimeId());
-            lastSeenMap.put(event.robotId(), OffsetDateTime.now());
-        }
         String data;
         try { data = mapper.writeValueAsString(event); }
         catch (Exception error) { throw new IllegalArgumentException("Invalid telemetry", error); }
@@ -105,8 +95,6 @@ public class TelemetryStreamService implements AutoCloseable {
     }
 
     public void reset() {
-        lastSeenMap.clear();
-        runtimeIds.clear();
         for (Connection connection : connections) connection.finish(new IOException("Realtime connection reset"));
     }
 

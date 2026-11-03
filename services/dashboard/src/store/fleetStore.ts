@@ -20,7 +20,7 @@ interface FleetStore {
   setSimulationError: (error: string | null) => void;
 
   /** REST /api/robots 초기 로딩 결과 반영 */
-  initFromRest: (list: RobotStatusDto[]) => void;
+  initFromRest: (list: RobotStatusDto[], observedSinceRequest?: ReadonlySet<string>) => void;
 
   /** REST pose history 결과를 궤적 초기값으로 반영 (SSE append 와 공존) */
   initTrail: (robotId: string, points: { x: number; y: number }[], runtimeId?: string | null) => void;
@@ -79,14 +79,19 @@ export const useFleetStore = create<FleetStore>((set) => ({
     error: null,
   },
 
-  initFromRest: (list) => set((prev) => {
+  initFromRest: (list, observedSinceRequest) => set((prev) => {
     const robots = { ...prev.robots };
     for (const dto of list) {
       if (prev.simulations && prev.simulations[dto.robotId]?.desiredState !== "RUNNING") continue;
       const runtimeId = prev.simulations?.[dto.robotId]?.runtimeId;
       if (runtimeId && dto.runtimeId !== runtimeId) continue;
       const existing = robots[dto.robotId];
-      if (existing?.lastSeen && (!dto.lastSeen || existing.lastSeen >= dto.lastSeen)) continue;
+      if (existing?.lastSeen && (!dto.lastSeen || existing.lastSeen >= dto.lastSeen)) {
+        if (existing.lastSeen === dto.lastSeen && !observedSinceRequest?.has(dto.robotId)) {
+          robots[dto.robotId] = { ...existing, online: dto.online };
+        }
+        continue;
+      }
       robots[dto.robotId] = {
         ...dto, runtimeId: dto.runtimeId ?? null, state: dto.state ?? "unknown",
         trail: existing?.trail.length ? existing.trail : dto.pose ? [{ x: dto.pose.x, y: dto.pose.y }] : [],
@@ -168,6 +173,9 @@ export const useFleetStore = create<FleetStore>((set) => ({
 
   setRealtimeState: (state, error = null) =>
     set((prev) => ({
+      ...(state === "error" ? { robots: Object.fromEntries(
+        Object.entries(prev.robots).map(([id, robot]) => [id, { ...robot, online: false }])
+      ) } : {}),
       realtime: {
         ...prev.realtime,
         state,

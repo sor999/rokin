@@ -54,3 +54,56 @@ test('SSE 재연결은 REST 상태를 복구하고 이전 연결의 응답과 �
     assert.equal(source.closed, true);
   } finally { cleanup?.(); global.EventSource = previous; }
 });
+
+test('503으로 닫힌 SSE를 새 연결로 재시도하고 이전 연결의 콜백은 무시한다', async () => {
+  const previous = { source: global.EventSource, setTimeout: global.setTimeout, clearTimeout: global.clearTimeout };
+  const sources = [], timers = [], updates = [], snapshots = [];
+  let cleanup;
+  class FakeSource {
+    listeners = {};
+    constructor() { sources.push(this); }
+    addEventListener(name, callback) { this.listeners[name] = callback; }
+    close() { this.closed = true; }
+  }
+  global.EventSource = FakeSource;
+  global.setTimeout = (callback, delay) => { const timer = { callback, delay }; timers.push(timer); return timer; };
+  global.clearTimeout = (timer) => { if (timer) timer.cancelled = true; };
+  const store = { upsertFromSSE: value => updates.push(value), setRealtimeState: () => {},
+    initFromRest: value => snapshots.push(value) };
+  const useStore = selector => selector(store);
+  useStore.getState = () => store;
+  const filename = path.resolve(__dirname, '../src/hooks/useFleetSSE.ts');
+  const module = new Module(filename);
+  module.require = name => {
+    if (name === 'react') return { useEffect: effect => { cleanup = effect(); }, useRef: () => ({ current: null }) };
+    if (name === '@/store/fleetStore') return { useFleetStore: useStore };
+    if (name === '@/services/api') return { fetchRobots: async () => ['shared'] };
+    throw new Error(name);
+  };
+  try {
+    module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    }).outputText, filename);
+    module.exports.useFleetSSE();
+    sources[0].onerror(); sources[0].onerror();
+    assert.equal(sources[0].closed, true);
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].delay, 2000);
+    timers[0].callback();
+    assert.equal(sources.length, 2);
+    sources[0].onopen(); sources[0].listeners.robot_update({ data: '{"robotId":"old"}' });
+    sources[1].onopen();
+    sources[1].listeners.robot_update({ data: '{"robotId":"current"}' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(snapshots, [['shared']]);
+    assert.deepEqual(updates, [{ robotId: 'current' }]);
+    sources[1].onerror();
+    cleanup();
+    assert.equal(timers[1].cancelled, true);
+    timers[1].callback();
+    assert.equal(sources.length, 2);
+  } finally {
+    cleanup?.(); global.EventSource = previous.source;
+    global.setTimeout = previous.setTimeout; global.clearTimeout = previous.clearTimeout;
+  }
+});

@@ -1,35 +1,46 @@
 package com.robot.fleet.domain.telemetry.listener;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.robot.fleet.domain.presence.service.PresenceService;
+import com.robot.fleet.domain.realtime.RealtimePublisher;
 import com.robot.fleet.domain.simulation.service.SimulationService;
-import com.robot.fleet.domain.telemetry.dto.*;
-import com.robot.fleet.domain.telemetry.service.*;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.*;
-import org.springframework.test.util.ReflectionTestUtils;
-import java.time.OffsetDateTime;
+import org.springframework.dao.DataAccessResourceFailureException;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class TelemetryRuntimeTest {
-    @Test @DisplayName("미래 시각의 이전 실행 이벤트가 있어도 현재 실행의 수신으로 온라인을 복구한다")
-    void broadcast_UsesReceiveTimeAndRejectsRetiredRuntime() throws Exception {
+    private final RealtimePublisher publisher = mock(RealtimePublisher.class);
+    private final PresenceService presence = mock(PresenceService.class);
+    private final SimulationService simulations = mock(SimulationService.class);
+    private final TelemetryKafkaListener listener = new TelemetryKafkaListener(publisher,
+            new ObjectMapper().findAndRegisterModules(), presence, simulations);
+    private final String json = """
+            {"event_id":"0b181550-d9e4-4a66-8e0b-360d71dbece4","robot_id":"robot",
+             "timestamp":"2020-01-01T00:00:00Z","simulation_runtime_id":"current","data":{"x":1,"y":2}}
+            """;
+
+    @Test @DisplayName("이전 runtime과 만료된 이벤트는 전달하지 않는다")
+    void handle_FencesRuntimeAndExpiredEvents() {
         // given
-        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
-        var stream = new TelemetryStreamService(mapper, new SimpleMeterRegistry());
-        var offline = new OfflineDetectorService(stream);
-        ReflectionTestUtils.setField(offline, "thresholdSeconds", 30L);
-        var simulations = mock(SimulationService.class);
         when(simulations.acceptsTelemetry("robot", "current")).thenReturn(true);
-        var listener = new TelemetryKafkaListener(new com.robot.fleet.domain.realtime.LocalRealtimePublisher(stream, mock(org.springframework.messaging.simp.SimpMessagingTemplate.class)), mapper, simulations);
-        stream.broadcast(new PoseTelemetryDto("pose", "robot", OffsetDateTime.now().plusYears(1), "old", new PoseTelemetryDataDto(99, 99)));
+        when(presence.observe(any())).thenReturn(false);
         // when
-        String current = "{\"event_id\":\"0b181550-d9e4-4a66-8e0b-360d71dbece4\",\"robot_id\":\"robot\",\"timestamp\":\"2020-01-01T00:00:00Z\",\"simulation_runtime_id\":\"current\",\"data\":{\"x\":1,\"y\":2}}";
-        listener.handlePoseTelemetry(current);
-        listener.handlePoseTelemetry(current.replace("current", "old"));
+        listener.handlePoseTelemetry(json.replace("current", "old"));
+        listener.handlePoseTelemetry(json);
         // then
-        assertThat(stream.getRuntimeId("robot")).isEqualTo("current");
-        assertThat(offline.isOffline("robot", "current")).isFalse();
-        assertThat(stream.getLastSeenMap().get("robot")).isBetween(OffsetDateTime.now().minusSeconds(5), OffsetDateTime.now());
+        verify(presence, times(1)).observe(any());
+        verifyNoInteractions(publisher);
+    }
+
+    @Test @DisplayName("공유 저장소 실패는 잘못된 payload로 삼키지 않고 Kafka에 전파한다")
+    void handle_PropagatesStorageFailure() {
+        // given
+        when(simulations.acceptsTelemetry("robot", "current")).thenReturn(true);
+        when(presence.observe(any())).thenThrow(new DataAccessResourceFailureException("unavailable"));
+        // when, then
+        assertThatThrownBy(() -> listener.handlePoseTelemetry(json)).isInstanceOf(DataAccessResourceFailureException.class);
+        verifyNoInteractions(publisher);
     }
 }

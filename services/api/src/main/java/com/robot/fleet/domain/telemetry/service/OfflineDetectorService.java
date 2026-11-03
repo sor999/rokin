@@ -1,46 +1,35 @@
 package com.robot.fleet.domain.telemetry.service;
 
+import com.robot.fleet.domain.presence.service.PresenceService;
 import com.robot.fleet.domain.telemetry.dto.OfflineTelemetryDto;
+import com.robot.fleet.domain.telemetry.dto.StatusTelemetryDataDto;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
-import java.util.Map;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OfflineDetectorService {
-
+    private final PresenceService presence;
     private final TelemetryStreamService streamService;
 
-    @Value("${fleet.offline-threshold-seconds:30}")
-    private long thresholdSeconds;
-
-    public boolean isOffline(String robotId) {
-        OffsetDateTime lastSeen = streamService.getLastSeenMap().get(robotId);
-        if (lastSeen == null) return true;
-        return lastSeen.isBefore(OffsetDateTime.now().minusSeconds(thresholdSeconds));
-    }
-
     public boolean isOffline(String robotId, String runtimeId) {
-        return isOffline(robotId) || !java.util.Objects.equals(runtimeId, streamService.getRuntimeId(robotId));
+        return !presence.online(robotId, runtimeId);
     }
 
     @Scheduled(fixedRateString = "${fleet.offline-check-ms:5000}", initialDelayString = "${fleet.offline-initial-delay:1000}")
     public void detectOfflineRobots() {
-        OffsetDateTime threshold = OffsetDateTime.now().minusSeconds(thresholdSeconds);
-        for (Map.Entry<String, OffsetDateTime> entry : streamService.getLastSeenMap().entrySet()) {
-            String robotId = entry.getKey();
-            OffsetDateTime lastSeen = entry.getValue();
-            if (lastSeen.isBefore(threshold)) {
-                log.info("[Offline] 로봇 오프라인 감지: {} (마지막 수신: {})", robotId, lastSeen);
-                streamService.broadcast(new OfflineTelemetryDto("offline", robotId, OffsetDateTime.now(),
-                        streamService.getRuntimeId(robotId), new com.robot.fleet.domain.telemetry.dto.StatusTelemetryDataDto("offline")));
+        try {
+            for (var robot : presence.expired()) {
+                streamService.broadcast(new OfflineTelemetryDto("offline", robot.robotId(), OffsetDateTime.now(),
+                        robot.runtimeId(), new StatusTelemetryDataDto("offline")));
             }
+        } catch (org.springframework.web.server.ResponseStatusException
+                 | org.springframework.dao.DataAccessException
+                 | org.springframework.transaction.TransactionException unavailable) {
+            streamService.reset();
         }
     }
 }
