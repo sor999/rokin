@@ -87,3 +87,72 @@ test('첫 스냅샷과 일치하는 데이터는 보존하고 늦은 생성 응�
   assert.equal(state.getState().simulations.robot_4.runtimeId, 'new');
   assert.equal(state.getState().robots.robot_4.pose.x, 2);
 });
+
+
+test('연결 장애 시 온라인을 해제하고 같은 timestamp의 공유 스냅샷으로 복구한다', () => {
+  const state = store();
+  const event = pose();
+  state.getState().upsertFromSSE(event);
+  state.getState().setRealtimeState('error', 'SSE connection error');
+  assert.equal(state.getState().robots.robot_4.online, false);
+  assert.equal(state.getState().robots.robot_4.pose.x, 2);
+  state.getState().setRealtimeState('live');
+  assert.equal(state.getState().robots.robot_4.online, false);
+  state.getState().initFromRest([{ robotId: 'robot_4', online: true, lastSeen: event.timestamp,
+    pose: { x: 2, y: 3, timestamp: event.timestamp }, battery: null, state: 'idle' }]);
+  assert.equal(state.getState().robots.robot_4.online, true);
+});
+
+
+test('복구 조회 중 받은 SSE의 온라인 판정을 같은 timestamp의 늦은 REST가 덮어쓰지 않는다', () => {
+  const state = store();
+  const event = pose();
+  state.getState().upsertFromSSE(event);
+  state.getState().initFromRest([{ robotId: 'robot_4', online: false, lastSeen: event.timestamp,
+    pose: { x: 2, y: 3, timestamp: event.timestamp }, battery: null, state: 'idle' }], new Set(['robot_4']));
+  assert.equal(state.getState().robots.robot_4.online, true);
+});
+
+test('이전 pose와 중복 pose는 위치, 궤적, 마지막 관측 시각을 되돌리지 않는다', () => {
+  const state = store();
+  const current = { ...pose(), timestamp: '2026-11-03T01:00:02.000Z' };
+  assert.equal(state.getState().upsertFromSSE(current), true);
+  assert.equal(state.getState().upsertFromSSE(current), false);
+  assert.equal(state.getState().upsertFromSSE({ ...pose(), timestamp: '2026-11-03T01:00:01Z', data: {x: 99, y: 99} }), false);
+  assert.equal(state.getState().robots.robot_4.pose.x, 2);
+  assert.equal(state.getState().robots.robot_4.trail.length, 1);
+  assert.equal(state.getState().robots.robot_4.lastSeen, current.timestamp);
+});
+
+test('늦은 오프라인은 더 최신 관측을 덮지 않고 같은 관측의 만료만 적용한다', () => {
+  const state = store();
+  const current = { ...pose(), timestamp: '2026-11-03T01:00:02Z' };
+  state.getState().upsertFromSSE(current);
+  assert.equal(state.getState().upsertFromSSE({ ...current, type: 'offline', timestamp: '2026-11-03T01:00:01Z' }), false);
+  assert.equal(state.getState().robots.robot_4.online, true);
+  assert.equal(state.getState().upsertFromSSE({ ...current, type: 'offline' }), true);
+  assert.equal(state.getState().robots.robot_4.online, false);
+});
+
+test('필터된 runtime의 이벤트는 복구 보호 대상이 되지 않는다', () => {
+  const state = store();
+  state.getState().syncSimulations([simulation({ runtimeId: 'current', state: 'RUNNING' })]);
+  assert.equal(state.getState().upsertFromSSE({ ...pose(), runtimeId: 'retired' }), false);
+  state.getState().upsertFromSSE({ ...pose(), runtimeId: 'current' });
+  state.getState().setRealtimeState('error');
+  state.getState().initFromRest([{ robotId: 'robot_4', runtimeId: 'current', online: true,
+    lastSeen: pose().timestamp, pose: {x:2,y:3,timestamp:pose().timestamp}, battery: null, state: 'idle' }], new Set());
+  assert.equal(state.getState().robots.robot_4.online, true);
+});
+
+test('복구 중 수신한 상태와 배터리는 더 최신 pose의 REST 응답으로 교체하지 않는다', () => {
+  const state = store();
+  const timestamp = '2026-11-03T01:00:01Z';
+  state.getState().upsertFromSSE({ ...pose(), type: 'battery', timestamp, data: {level: 80} });
+  state.getState().upsertFromSSE({ ...pose(), type: 'status', timestamp, data: {state: 'moving'} });
+  state.getState().initFromRest([{ robotId:'robot_4', online:true, lastSeen:'2026-11-03T01:00:02Z',
+    pose:{x:5,y:6,timestamp:'2026-11-03T01:00:02Z'}, battery:{level:20,timestamp}, state:'idle' }], new Set(['robot_4']));
+  assert.equal(state.getState().robots.robot_4.state, 'moving');
+  assert.equal(state.getState().robots.robot_4.battery.level, 80);
+  assert.equal(state.getState().robots.robot_4.pose.x, 5);
+});

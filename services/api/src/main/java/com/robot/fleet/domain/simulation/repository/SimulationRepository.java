@@ -56,12 +56,16 @@ public class SimulationRepository {
                 """, robotId);
     }
 
-    public void report(String robotId, String state, String error, String runtimeId, OffsetDateTime now) {
+    public void report(String robotId, String state, String error, String runtimeId) {
         jdbc.update("""
-                UPDATE simulation_robot SET runtime_state = ?, error = ?, runtime_id = ?, reported_at = ?
+                UPDATE simulation_robot SET runtime_state = ?, error = ?, runtime_id = ?, reported_at = clock_timestamp()
                 WHERE robot_id = ?
-                """, state, error, runtimeId, now, robotId);
+                """, state, error, runtimeId, robotId);
     }
+    public OffsetDateTime now() {
+        return jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
+    }
+
     public Optional<String> currentRuntime(String fleetId) {
         return jdbc.query("SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1",
                 (rs, n) -> rs.getString(1), fleetId).stream().findFirst();

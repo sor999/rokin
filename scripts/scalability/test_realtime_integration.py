@@ -124,3 +124,61 @@ class RealtimeIntegrationTest(unittest.TestCase):
         self.assertTrue(self.persisted(18081, cmd))
         next_cmd = self.stop_command(second)
         self.wait(lambda: self.ack_done(fresh, next_cmd) and self.ack_done(second, next_cmd), 5)
+
+    def test_shared_presence_database_outage_and_recovery(self):
+        first, second = self.connect(18081), self.connect(18082)
+
+        def online(port):
+            try:
+                robots = [robot for robot in request(f'http://localhost:{port}/api/robots')
+                          if robot['robotId'] in self.robots]
+                return len(robots) == len(self.robots) and all(robot['online'] for robot in robots)
+            except Exception:
+                return False
+
+        self.wait(lambda: online(18081) and online(18082))
+        for client in (first, second):
+            cmd = self.stop_command(client)
+            self.wait(lambda: self.ack_done(first, cmd) and self.ack_done(second, cmd), 5)
+        try:
+            self.docker('stop', '--time', '2', 'rokin-scale-lab-postgres-1')
+            for port in (18081, 18082):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    request(f'http://localhost:{port}/api/robots')
+                self.assertEqual(error.exception.code, 503)
+            self.wait(lambda: all(any(error.startswith('SSE') for error in client.errors)
+                                 for client in (first, second)), 15)
+        finally:
+            self.docker('start', 'rokin-scale-lab-postgres-1')
+        self.wait(lambda: self.healthy(18081) and self.healthy(18082), 30)
+        self.wait(lambda: online(18081) and online(18082), 30)
+        fresh_first, fresh_second = self.connect(18081), self.connect(18082)
+        for client in (fresh_first, fresh_second):
+            cmd = self.stop_command(client)
+            self.wait(lambda: self.ack_done(fresh_first, cmd) and self.ack_done(fresh_second, cmd), 5)
+
+    def test_runtime_restart_converges_both_api_presence(self):
+        first, second = self.connect(18081), self.connect(18082)
+        previous = {robot['runtimeId'] for robot in request('http://localhost:18081/api/simulations')
+                    if robot['robotId'] in self.robots}
+        self.docker('restart', '--time', '10', 'rokin-scale-lab-fake_robot-1')
+
+        def restored():
+            for port in (18081, 18082):
+                registrations = [robot for robot in request(f'http://localhost:{port}/api/simulations')
+                                 if robot['robotId'] in self.robots]
+                if not registrations or any(robot['runtimeId'] in previous or robot['state'] != 'RUNNING'
+                                            for robot in registrations):
+                    return False
+                robots = [robot for robot in request(f'http://localhost:{port}/api/robots')
+                          if robot['robotId'] in self.robots]
+                if len(robots) != len(self.robots) or not all(robot['online'] for robot in robots):
+                    return False
+            return True
+
+        started = time.monotonic()
+        self.wait(restored, 60)
+        print(f"ROS runtime recovery: {time.monotonic() - started:.3f}s", flush=True)
+        for client in (first, second):
+            cmd = self.stop_command(client)
+            self.wait(lambda: self.ack_done(first, cmd) and self.ack_done(second, cmd), 5)

@@ -29,6 +29,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ErrorResponse.of(ErrorCode.INVALID_REQUEST));
     }
 
+    @ExceptionHandler({org.springframework.dao.DataAccessException.class,
+            org.springframework.transaction.TransactionException.class})
+    public ResponseEntity<ErrorResponse> handleStorageUnavailable(Exception e) {
+        log.warn("[API] 상태 저장소 사용 불가: {}", e.getClass().getSimpleName());
+        return ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR, "상태 저장소에 연결할 수 없습니다."));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
         log.error("[API] 예상치 못한 오류", e);

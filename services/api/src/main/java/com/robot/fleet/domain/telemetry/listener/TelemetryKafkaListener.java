@@ -23,6 +23,7 @@ public class TelemetryKafkaListener {
 
     private final RealtimePublisher publisher;
     private final ObjectMapper objectMapper;
+    private final com.robot.fleet.domain.presence.service.PresenceService presence;
     private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
 
     private <T> void handleTelemetryMessage(
@@ -41,12 +42,14 @@ public class TelemetryKafkaListener {
             T message = objectMapper.treeToValue(json, messageType);
             event = mapper.apply(message);
             if (event.robotId() == null || !event.robotId().matches("[A-Za-z][A-Za-z0-9_-]{0,127}") || event.occurredAt() == null || event.data() == null) throw new IllegalArgumentException("Invalid telemetry");
-            if (!simulations.acceptsTelemetry(event.robotId(), event.runtimeId())) return;
 
         } catch (Exception e) {
             log.warn("[Listener] Invalid {} message: {}", type, e.getClass().getSimpleName());
             return;
         }
+        if (!simulations.acceptsTelemetry(event.robotId(), event.runtimeId())) return;
+        if (!presence.observe(event)) return;
+        if (!presence.online(event.robotId(), event.runtimeId())) return;
         publisher.telemetry(eventId, event);
     }
 

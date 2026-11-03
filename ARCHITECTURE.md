@@ -75,3 +75,10 @@ STOMP SimpleBroker는 로컬 연결에만 전송하는 말단이며 API 간 전�
 단절 시 연결을 닫고, 재접속한 화면은 REST로 현재 상태와 알려진 명령의 Ack를 복구한다.
 경로·버퍼·복구 의미는 [ADR 0005](docs/decisions/0005-realtime-fanout.md)와
 [실행·검증 문서](docs/features/realtime-fanout.md)를 따른다.
+
+## API의 공유 온라인 판정
+
+Kafka를 소비한 API가 PostgreSQL presence에 관측 시각을 저장하고 모든 API가 DB의
+현재 runtime, 준비 상태, heartbeat 및 관측 만료를 함께 확인한다. Redis와 SSE 전송은
+온라인 유효기간을 갱신하지 않는다. 저장소 장애 시 명령을 거부하며 복구와 시계 계약은
+[ADR 0006](docs/decisions/0006-shared-presence.md)을 따른다.

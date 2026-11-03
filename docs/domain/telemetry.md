@@ -74,3 +74,10 @@ ROS 관리 런타임은 현재 등록 버전 및 프로세스 인스턴스가 �
 관리 pose/battery/status envelope의 선택 필드 `simulation_runtime_id`는 Worker가 보존하고
 API가 SSE/REST의 `runtimeId`로 전달한다. 현재 등록 인스턴스와 다른 데이터는 현재 상태에
 합성하지 않는다. 정적 로봇은 이 필드를 생략할 수 있고 과거 이력은 삭제하지 않는다.
+
+## 공유 온라인 상태와 오프라인 관측
+
+온라인은 DB의 현재 runtime, 준비 보고, heartbeat와 유효한 관측으로 판단한다.
+SSE의 offline timestamp는 만료 조회에서 얻은 원본 관측 시각이다. 화면은 더 최신 관측이
+있으면 이 offline을 무시하고, 같은 관측의 만료는 적용한다. 지연 pose와 같은 시각의
+재전달은 위치와 궤적을 되돌리지 않는다. 상세 계약은 [ADR 0006](../decisions/0006-shared-presence.md)을 따른다.

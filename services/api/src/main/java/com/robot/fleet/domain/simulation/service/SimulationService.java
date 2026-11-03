@@ -68,7 +68,7 @@ public class SimulationService implements ApplicationRunner {
     @Transactional(readOnly = true)
     public List<SimulationDto> list() {
         String current = repository.currentRuntime(fleetId).orElse(null);
-        OffsetDateTime threshold = OffsetDateTime.now().minusSeconds(10);
+        OffsetDateTime threshold = repository.now().minusSeconds(10);
         return repository.findAll(fleetId).stream().map(robot -> {
             if (robot.desiredState().equals("RUNNING") && current != null && !current.equals(robot.runtimeId())) {
                 return new SimulationDto(robot.robotId(), robot.fleetId(), robot.startX(), robot.startY(), robot.speed(),
@@ -99,7 +99,7 @@ public class SimulationService implements ApplicationRunner {
         if (robot.version() != report.version()) return;
         if (robot.desiredState().equals("DELETED") != report.state().equals("DELETED")
                 && !report.state().equals("FAILED")) return;
-        repository.report(robot.robotId(), report.state(), report.error(), report.runtimeId(), OffsetDateTime.now());
+        repository.report(robot.robotId(), report.state(), report.error(), report.runtimeId());
     }
 
     public void registerRuntime(String runtimeId) {
@@ -125,6 +125,9 @@ public class SimulationService implements ApplicationRunner {
         if (robot == null) {
             if (repository.findOwner(robotId).isPresent()) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "다른 Fleet의 로봇입니다.");
+            }
+            if (offlineDetector.isOffline(robotId, null)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "온라인 상태를 확인하세요.");
             }
             return Map.of();
         }

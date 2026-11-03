@@ -108,3 +108,11 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - Dashboard: commandRecovery와 fleetRecovery 테스트로 알려진 요청의 복구와 이전 연결 응답 차단을 검증한다.
 - 격리 환경의 API 재시작·Redis 단절 검증은 [실시간 전달 문서](../features/realtime-fanout.md)를 따른다.
 - `RUN_REALTIME_INTEGRATION=1`에서만 Docker 정지·재시작을 수행하며 일반 Python 테스트에서는 건너뛴다.
+
+## 공유 온라인 상태 검증
+
+- API: PresenceServiceTest와 TelemetryRuntimeTest로 장애와 잘못된 입력 및 전파를 검증한다.
+- `PRESENCE_TEST_URL`이 있으면 PresencePostgresTest가 격리 PostgreSQL에 전체 마이그레이션을
+  적용하고 분산 판정, 재시작, 중복, 동시 갱신, runtime 교체, 만료와 명령 차단을 검증한다.
+- Dashboard는 연결 오류 시 온라인 해제와 스냅샷 및 SSE 경쟁을 검증한다.
+- 실제 API 2대와 DB 및 ROS 재시작 검증은 [공유 상태 문서](../features/shared-presence.md)를 따른다.
