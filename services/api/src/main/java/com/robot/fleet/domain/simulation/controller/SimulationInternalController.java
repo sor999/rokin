@@ -37,8 +37,7 @@ public class SimulationInternalController {
     @GetMapping
     public Map<String, Object> snapshot(@RequestHeader(value = "X-Simulator-Token", required = false) String candidate) {
         authenticate(candidate);
-        return Map.of("fleetId", fleetId, "simulations", service.list().stream()
-                .filter(robot -> !robot.state().equals("DELETED")).toList());
+        return Map.of("fleetId", fleetId, "simulations", service.list(true));
     }
 
     public record RuntimeRegistration(String runtimeId) { }

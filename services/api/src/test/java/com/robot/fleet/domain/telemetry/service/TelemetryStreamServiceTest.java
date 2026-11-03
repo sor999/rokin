@@ -117,4 +117,46 @@ class TelemetryStreamServiceTest {
         }
     }
 
+    @Test @DisplayName("같은 오프라인 관측은 연결별 한 번만 보내고 온라인 전이와 새 구독은 보존한다")
+    void broadcast_SuppressesOnlySameOfflineGenerationPerConnection() throws Exception {
+        // given
+        try (var stream = new TelemetryStreamService(new ObjectMapper().findAndRegisterModules(), new SimpleMeterRegistry())) {
+            var original = new Emitter(false);
+            stream.registerEmitter(original);
+            var at = OffsetDateTime.now().minusSeconds(31);
+            var offline = new OfflineTelemetryDto("offline", "robot_1", at, "current", new StatusTelemetryDataDto("offline"));
+            // when
+            stream.broadcast(offline);
+            awaitValues(original,1);
+            stream.broadcast(offline);
+            stream.broadcast(event("robot_1",1));
+            awaitValues(original,2);
+            // then
+            assertThat(original.values).hasSize(2);
+            // when
+            stream.broadcast(offline);
+            awaitValues(original,3);
+            var fresh = new Emitter(false);
+            stream.registerEmitter(fresh);
+            stream.broadcast(offline);
+            awaitValues(fresh,1);
+            // then
+            assertThat(original.values).hasSize(3);
+            // when
+            var next = new OfflineTelemetryDto("offline","robot_1",at.plusSeconds(1),"current",new StatusTelemetryDataDto("offline"));
+            stream.broadcast(next);
+            awaitValues(original,4);awaitValues(fresh,2);
+            var mapper = new ObjectMapper().findAndRegisterModules();
+            assertThat(original.values.get(3)).isEqualTo(mapper.writeValueAsString(next));
+            assertThat(original.values.get(3)).isNotEqualTo(original.values.get(2));
+            assertThat(fresh.values.get(1)).isNotEqualTo(fresh.values.get(0));
+        }
+    }
+
+    private void awaitValues(Emitter emitter,int count) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+        while(emitter.values.size()<count && System.nanoTime()<deadline) Thread.sleep(5);
+        assertThat(emitter.values).hasSize(count);
+    }
+
 }

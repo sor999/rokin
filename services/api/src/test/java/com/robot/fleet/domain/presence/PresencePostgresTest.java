@@ -251,4 +251,46 @@ class PresencePostgresTest {
         assertThat(second.online("legacy", null)).isTrue();
     }
 
+    @Test @DisplayName("같거나 과거 시각의 관측은 행 버전을 바꾸지 않고 기존 온라인 판정을 유지한다")
+    void observe_SkipsUnchangedWritesWithoutLosingReadiness() {
+        // given
+        var timestamp=now();
+        assertThat(first.observe(event(runtime,timestamp))).isTrue();
+        var original=jdbc.queryForObject("SELECT xmin::text FROM robot_presence",String.class);
+        // when, then
+        assertThat(first.observe(event(runtime,timestamp))).isTrue();
+        assertThat(first.observe(event(runtime,timestamp.minusSeconds(1)))).isTrue();
+        assertThat(jdbc.queryForObject("SELECT xmin::text FROM robot_presence",String.class)).isEqualTo(original);
+        jdbc.update("UPDATE robot_presence SET observed_at=clock_timestamp()-INTERVAL '31' SECOND");
+        assertThat(first.observe(event(runtime,timestamp))).isFalse();
+    }
+
+    @Test @DisplayName("로컬 전송 전 삭제와 runtime 교체를 다시 확인해 과거 관측을 보내지 않는다")
+    void localPublisher_FencesTransitionsAfterObservation() {
+        // given
+        var messaging=org.mockito.Mockito.mock(org.springframework.messaging.simp.SimpMessagingTemplate.class);
+        var localStream=org.mockito.Mockito.mock(TelemetryStreamService.class);
+        var publisher=new com.robot.fleet.domain.realtime.LocalRealtimePublisher(localStream,messaging,first);
+        var old=event(runtime,now());
+        assertThat(first.observe(old)).isTrue();
+        publisher.telemetry(UUID.randomUUID().toString(),old);
+        org.mockito.Mockito.verify(localStream).broadcast(old);
+        org.mockito.Mockito.clearInvocations(localStream);
+        // when
+        apiA.registerRuntime(UUID.randomUUID().toString());
+        publisher.telemetry(UUID.randomUUID().toString(),old);
+        // then
+        org.mockito.Mockito.verifyNoInteractions(localStream);
+        // given
+        var current=apiA.list().getFirst().runtimeId();
+        apiA.report(new SimulationReport("robot",1,"RUNNING",null,current));
+        var fresh=event(current,now());
+        assertThat(first.observe(fresh)).isTrue();
+        // when
+        apiA.delete("robot");
+        publisher.telemetry(UUID.randomUUID().toString(),fresh);
+        // then
+        org.mockito.Mockito.verifyNoInteractions(localStream);
+    }
+
 }

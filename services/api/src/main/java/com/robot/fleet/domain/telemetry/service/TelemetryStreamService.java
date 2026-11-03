@@ -77,7 +77,7 @@ public class TelemetryStreamService implements AutoCloseable {
         broadcastCounter.increment();
         lag.record(Math.max(0, Duration.between(event.occurredAt(), OffsetDateTime.now()).toMillis()) / 1000.0);
         String key = event.robotId() + ":" + event.type();
-        for (Connection connection : connections) connection.offer(key, data);
+        for (Connection connection : connections) connection.offerEvent(event, key, data);
     }
 
     @Scheduled(fixedRateString = "${fleet.sse-ping-ms:15000}")
@@ -103,6 +103,7 @@ public class TelemetryStreamService implements AutoCloseable {
     private final class Connection {
         private final SseEmitter emitter;
         private final LinkedHashMap<String, String> queue = new LinkedHashMap<>();
+        private final LinkedHashMap<String, String> offline = new LinkedHashMap<>();
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicInteger tasks = new AtomicInteger(2);
         private volatile long sendingSince;
@@ -110,6 +111,15 @@ public class TelemetryStreamService implements AutoCloseable {
 
         private Connection(SseEmitter emitter) { this.emitter = emitter; }
         private synchronized int pending() { return queue.size(); }
+
+        private synchronized void offerEvent(TelemetryEvent event, String key, String data) {
+            if (closed.get()) return;
+            if (event.type().equals("offline")) {
+                if (data.equals(offline.put(event.robotId(), data))) return;
+                if (offline.size() > 1024) offline.remove(offline.keySet().iterator().next());
+            } else offline.remove(event.robotId());
+            offer(key, data);
+        }
 
         private void offer(String key, String data) {
             boolean full;
@@ -147,7 +157,7 @@ public class TelemetryStreamService implements AutoCloseable {
         private void finish(Throwable error) {
             if (!closed.compareAndSet(false, true)) return;
             connections.remove(this);
-            synchronized (this) { queue.clear(); notifyAll(); }
+            synchronized (this) { queue.clear(); offline.clear(); notifyAll(); }
             Thread task = worker;
             if (task != null && task != Thread.currentThread()) task.interrupt();
             if (error != null) sendFailureCounter.increment();

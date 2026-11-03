@@ -21,7 +21,7 @@ import static org.mockito.BDDMockito.given;
 
 @DataJpaTest
 @org.springframework.test.context.ActiveProfiles("test")
-@Import({SimulationRepository.class, SimulationService.class, com.robot.fleet.domain.robot.service.RobotQueryService.class})
+@Import({SimulationRepository.class, SimulationService.class, com.robot.fleet.domain.robot.service.RobotQueryService.class, com.robot.fleet.domain.robot.repository.RobotSnapshotRepository.class})
 @TestPropertySource(properties = {
         "spring.sql.init.schema-locations=classpath:db/migration/V4__add_simulation_registry.sql,classpath:simulation-runtime-test.sql",
         "simulation.max-robots=3"})
@@ -34,6 +34,18 @@ class SimulationServiceTest {
 
     @BeforeEach
     void prepare() {
+        jdbc.execute("CREATE TABLE IF NOT EXISTS robot_presence(fleet_id VARCHAR(128),robot_id VARCHAR(128),runtime_id VARCHAR(36),observed_at TIMESTAMP WITH TIME ZONE)");
+        jdbc.execute("""
+                CREATE VIEW IF NOT EXISTS robot_latest AS SELECT robot_id, COALESCE(simulation_runtime_id,'') AS runtime_id,
+                    kind,event_id, timestamp AS observed_at,x,y,level,state FROM (
+                    SELECT *, ROW_NUMBER() OVER(PARTITION BY robot_id,simulation_runtime_id,kind ORDER BY timestamp DESC,event_id DESC) AS rank
+                    FROM (
+                        SELECT robot_id,simulation_runtime_id,'pose' AS kind,event_id,timestamp,x,y,CAST(NULL AS REAL) AS level,CAST(NULL AS VARCHAR(256)) AS state FROM telemetry_pose
+                        UNION ALL SELECT robot_id,simulation_runtime_id,'battery',event_id,timestamp,NULL,NULL,level,NULL FROM telemetry_battery
+                        UNION ALL SELECT robot_id,simulation_runtime_id,'status',event_id,timestamp,NULL,NULL,NULL,state FROM telemetry_status
+                    ) history
+                ) ranked WHERE rank=1
+                """);
         jdbc.execute("CREATE TABLE IF NOT EXISTS telemetry_pose(robot_id VARCHAR(64))");
         jdbc.update("DELETE FROM simulation_robot");
         jdbc.update("DELETE FROM simulation_runtime_session");

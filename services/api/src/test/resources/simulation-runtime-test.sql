@@ -1,3 +1,4 @@
+SET MODE PostgreSQL;
 CREATE TABLE simulation_runtime_session (
     runtime_id VARCHAR(36) PRIMARY KEY,
     fleet_id VARCHAR(128) NOT NULL,
@@ -5,3 +6,5 @@ CREATE TABLE simulation_runtime_session (
 );
 
 CREATE ALIAS IF NOT EXISTS clock_timestamp FOR "java.time.OffsetDateTime.now()";
+
+CREATE TABLE simulation_fleet_lock (fleet_id VARCHAR(128) PRIMARY KEY);
