@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.time.OffsetDateTime;
+
 
 @Service
 @RequiredArgsConstructor
@@ -23,7 +23,7 @@ public class OfflineDetectorService {
     public void detectOfflineRobots() {
         try {
             for (var robot : presence.expired()) {
-                streamService.broadcast(new OfflineTelemetryDto("offline", robot.robotId(), OffsetDateTime.now(),
+                streamService.broadcast(new OfflineTelemetryDto("offline", robot.robotId(), robot.observedAt(),
                         robot.runtimeId(), new StatusTelemetryDataDto("offline")));
             }
         } catch (org.springframework.web.server.ResponseStatusException

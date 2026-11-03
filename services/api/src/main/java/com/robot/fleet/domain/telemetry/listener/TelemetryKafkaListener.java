@@ -49,6 +49,7 @@ public class TelemetryKafkaListener {
         }
         if (!simulations.acceptsTelemetry(event.robotId(), event.runtimeId())) return;
         if (!presence.observe(event)) return;
+        if (!presence.online(event.robotId(), event.runtimeId())) return;
         publisher.telemetry(eventId, event);
     }
 

@@ -26,7 +26,7 @@ interface FleetStore {
   initTrail: (robotId: string, points: { x: number; y: number }[], runtimeId?: string | null) => void;
 
   /** SSE robot_update 이벤트 반영 */
-  upsertFromSSE: (event: TelemetryEvent) => void;
+  upsertFromSSE: (event: TelemetryEvent) => boolean;
 
   setRealtimeState: (
     state: RealtimeConnectionState,
@@ -92,8 +92,11 @@ export const useFleetStore = create<FleetStore>((set) => ({
         }
         continue;
       }
+      const preserveLive = existing && observedSinceRequest?.has(dto.robotId);
       robots[dto.robotId] = {
-        ...dto, runtimeId: dto.runtimeId ?? null, state: dto.state ?? "unknown",
+        ...dto,
+        ...(preserveLive ? { state: existing.state, battery: existing.battery, online: existing.online } : {}),
+        runtimeId: dto.runtimeId ?? null, state: preserveLive ? existing.state : dto.state ?? "unknown",
         trail: existing?.trail.length ? existing.trail : dto.pose ? [{ x: dto.pose.x, y: dto.pose.y }] : [],
       };
     }
@@ -114,16 +117,22 @@ export const useFleetStore = create<FleetStore>((set) => ({
       };
     }),
 
-  upsertFromSSE: (event) =>
+  upsertFromSSE: (event) => {
+    let applied = false;
     set((prev) => {
       if (prev.simulations && prev.simulations[event.robotId]?.desiredState !== "RUNNING") return {};
       const runtimeId = prev.simulations?.[event.robotId]?.runtimeId;
       if (runtimeId && event.runtimeId !== runtimeId) return {};
       const existing = prev.robots[event.robotId] ?? emptyRobot(event.robotId);
-      const updated = { ...existing, runtimeId: event.runtimeId ?? null, lastSeen: event.timestamp };
+      const eventTime = Date.parse(event.timestamp);
+      if (!Number.isFinite(eventTime)) return {};
+      if (event.type === "offline" && existing.lastSeen && Date.parse(existing.lastSeen) > eventTime) return {};
+      const updated = { ...existing, runtimeId: event.runtimeId ?? null,
+        lastSeen: existing.lastSeen && Date.parse(existing.lastSeen) > eventTime ? existing.lastSeen : event.timestamp };
 
       switch (event.type) {
         case "pose": {
+          if (existing.pose && Date.parse(existing.pose.timestamp) >= eventTime) return {};
           const x = Number(event.data.x);
           const y = Number(event.data.y);
           if (!Number.isFinite(x) || !Number.isFinite(y)) {
@@ -160,6 +169,7 @@ export const useFleetStore = create<FleetStore>((set) => ({
         }
       }
 
+      applied = true;
       return {
         robots: { ...prev.robots, [event.robotId]: updated },
         realtime: {
@@ -169,7 +179,9 @@ export const useFleetStore = create<FleetStore>((set) => ({
           error: null,
         },
       };
-    }),
+    });
+    return applied;
+  },
 
   setRealtimeState: (state, error = null) =>
     set((prev) => ({

@@ -43,4 +43,20 @@ class TelemetryRuntimeTest {
         assertThatThrownBy(() -> listener.handlePoseTelemetry(json)).isInstanceOf(DataAccessResourceFailureException.class);
         verifyNoInteractions(publisher);
     }
+    @Test @DisplayName("관측이 있어도 준비 보고와 heartbeat가 유효하기 전에는 SSE로 보내지 않는다")
+    void handle_RequiresSharedReadinessBeforePublish() {
+        // given
+        when(simulations.acceptsTelemetry("robot", "current")).thenReturn(true);
+        when(presence.observe(any())).thenReturn(true);
+        when(presence.online("robot", "current")).thenReturn(false).thenReturn(true);
+        // when
+        listener.handlePoseTelemetry(json);
+        // then
+        verifyNoInteractions(publisher);
+        // when
+        listener.handlePoseTelemetry(json);
+        // then
+        verify(publisher).telemetry(anyString(), any());
+    }
+
 }

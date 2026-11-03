@@ -37,4 +37,18 @@ class PresenceServiceTest {
         // then
         verify(stream).reset();
     }
+    @Test @DisplayName("오프라인 이벤트는 조회한 관측 세대의 시각을 유지한다")
+    void detectOffline_UsesExpiredSourceTimestamp() {
+        // given
+        var presence = mock(PresenceService.class);
+        var stream = mock(TelemetryStreamService.class);
+        var observedAt = java.time.OffsetDateTime.now().minusSeconds(31);
+        when(presence.expired()).thenReturn(java.util.List.of(new PresenceRepository.Expired("robot", "runtime", observedAt)));
+        // when
+        new OfflineDetectorService(presence, stream).detectOfflineRobots();
+        // then
+        verify(stream).broadcast(new com.robot.fleet.domain.telemetry.dto.OfflineTelemetryDto("offline", "robot", observedAt,
+                "runtime", new com.robot.fleet.domain.telemetry.dto.StatusTelemetryDataDto("offline")));
+    }
+
 }

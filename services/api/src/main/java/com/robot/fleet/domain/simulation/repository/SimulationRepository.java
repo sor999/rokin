@@ -58,12 +58,12 @@ public class SimulationRepository {
 
     public void report(String robotId, String state, String error, String runtimeId) {
         jdbc.update("""
-                UPDATE simulation_robot SET runtime_state = ?, error = ?, runtime_id = ?, reported_at = CURRENT_TIMESTAMP
+                UPDATE simulation_robot SET runtime_state = ?, error = ?, runtime_id = ?, reported_at = clock_timestamp()
                 WHERE robot_id = ?
                 """, state, error, runtimeId, robotId);
     }
     public OffsetDateTime now() {
-        return jdbc.queryForObject("SELECT CURRENT_TIMESTAMP", OffsetDateTime.class);
+        return jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class);
     }
 
     public Optional<String> currentRuntime(String fleetId) {

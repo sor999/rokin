@@ -176,7 +176,7 @@ class PresencePostgresTest {
     void prune_PreservesRecentAndRegistry() {
         // given
         first.observe(event(runtime, now()));
-        jdbc.update("INSERT INTO robot_presence VALUES ('default', 'old', '', CURRENT_TIMESTAMP - INTERVAL '2' DAY)");
+        jdbc.update("INSERT INTO robot_presence VALUES ('default', 'old', '', CURRENT_TIMESTAMP - INTERVAL '2' DAY, CURRENT_TIMESTAMP - INTERVAL '2' DAY)");
         // when
         repository.prune();
         // then
@@ -200,6 +200,55 @@ class PresencePostgresTest {
         assertThatThrownBy(() -> commands.sendCommand(request)).isInstanceOfSatisfying(ResponseStatusException.class,
                 error -> assertThat(error.getStatusCode().value()).isEqualTo(503));
         org.mockito.Mockito.verifyNoInteractions(kafka);
+    }
+
+    @Test @DisplayName("미래 관측의 중복 수신은 최초 유효기간을 연장하지 않는다")
+    void observe_FutureDuplicatePreservesFirstClampedTime() {
+        // given
+        var future = now().plusSeconds(3);
+        first.observe(event(runtime, future));
+        var original = jdbc.queryForObject("SELECT observed_at FROM robot_presence", OffsetDateTime.class);
+        // when
+        first.observe(event(runtime, future));
+        first.observe(event(runtime, future.minusSeconds(1)));
+        // then
+        assertThat(jdbc.queryForObject("SELECT observed_at FROM robot_presence", OffsetDateTime.class)).isEqualTo(original);
+        assertThat(jdbc.queryForObject("SELECT source_timestamp FROM robot_presence", OffsetDateTime.class)).isEqualTo(future);
+        jdbc.update("UPDATE robot_presence SET observed_at = clock_timestamp() - INTERVAL '31' SECOND");
+        first.observe(event(runtime, future));
+        assertThat(second.online("robot", runtime)).isFalse();
+    }
+
+    @Test @DisplayName("오래된 트랜잭션에서도 관측과 heartbeat 만료를 현재 판정 시각으로 확인한다")
+    void online_UsesDecisionClockInsideExistingTransaction() throws Exception {
+        // given
+        first.observe(event(runtime, now()));
+        first.observe(new PoseTelemetryDto("pose", "static", now(), null, new PoseTelemetryDataDto(0, 0)));
+        try (var connection = source.getConnection()) {
+            connection.setAutoCommit(false);
+            var txJdbc = new JdbcTemplate(new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+            txJdbc.queryForObject("SELECT CURRENT_TIMESTAMP", OffsetDateTime.class);
+            txJdbc.update("UPDATE simulation_robot SET reported_at = CURRENT_TIMESTAMP - INTERVAL '9' SECOND");
+            // when
+            txJdbc.execute("SELECT pg_sleep(1.2)");
+            var txPresence = new PresenceRepository(txJdbc);
+            // then
+            assertThat(txPresence.online("default", "static", null, 1)).isFalse();
+            assertThat(txPresence.online("default", "robot", runtime, 30)).isFalse();
+            var txApi = new SimulationService(new SimulationRepository(txJdbc),
+                    new OfflineDetectorService(new PresenceService(txPresence, "default", 30), stream), "default", 20);
+            refused(txApi);
+            connection.rollback();
+        }
+    }
+
+    @Test @DisplayName("원본 시각 컬럼이 없는 구버전 API의 insert도 배포 전환 중 유지한다")
+    void migrate_PreservesLegacyWriterCompatibility() {
+        // given, when
+        jdbc.update("INSERT INTO robot_presence(fleet_id,robot_id,runtime_id,observed_at) VALUES ('default','legacy','',clock_timestamp())");
+        // then
+        assertThat(jdbc.queryForObject("SELECT source_timestamp FROM robot_presence WHERE robot_id='legacy'", OffsetDateTime.class)).isNotNull();
+        assertThat(second.online("legacy", null)).isTrue();
     }
 
 }
