@@ -30,7 +30,7 @@ public class PresenceRepository {
             """;
 
     public boolean observe(String fleet, String robot, String runtime, OffsetDateTime timestamp, long ttl) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("""
+        Boolean ready = jdbc.queryForObject("""
                 WITH decision AS MATERIALIZED (SELECT clock_timestamp() AS now),
                 input(fleet_id, robot_id, runtime_id, observed_at, source_timestamp) AS (
                     SELECT CAST(? AS VARCHAR), CAST(? AS VARCHAR), CAST(? AS VARCHAR),
@@ -43,13 +43,16 @@ public class PresenceRepository {
                     INSERT INTO robot_presence AS p (fleet_id, robot_id, runtime_id, observed_at, source_timestamp)
                     SELECT * FROM eligible
                     ON CONFLICT (fleet_id, robot_id, runtime_id) DO UPDATE
-                        SET observed_at = CASE WHEN EXCLUDED.source_timestamp > p.source_timestamp
-                            THEN GREATEST(p.observed_at, EXCLUDED.observed_at) ELSE p.observed_at END,
-                            source_timestamp = GREATEST(p.source_timestamp, EXCLUDED.source_timestamp)
+                        SET observed_at = GREATEST(p.observed_at, EXCLUDED.observed_at),
+                            source_timestamp = EXCLUDED.source_timestamp
+                        WHERE EXCLUDED.source_timestamp > p.source_timestamp
                     RETURNING p.fleet_id,p.robot_id,p.runtime_id,p.observed_at,p.source_timestamp
-                ) SELECT EXISTS(SELECT 1 FROM saved p CROSS JOIN decision d
-                    WHERE p.observed_at >= d.now - (? * INTERVAL '1' SECOND) AND
-                """ + READY + ")", Boolean.class, fleet, robot, runtime == null ? "" : runtime, timestamp, timestamp, timestamp, ttl, timestamp, ttl));
+                ) SELECT CASE WHEN EXISTS(SELECT 1 FROM saved) THEN
+                    EXISTS(SELECT 1 FROM saved p CROSS JOIN decision d
+                        WHERE p.observed_at >= d.now - (? * INTERVAL '1' SECOND) AND
+                """ + READY + ") WHEN EXISTS(SELECT 1 FROM eligible) THEN NULL ELSE FALSE END",
+                Boolean.class, fleet, robot, runtime == null ? "" : runtime, timestamp, timestamp, timestamp, ttl, timestamp, ttl);
+        return ready == null ? online(fleet, robot, runtime, ttl) : ready;
     }
 
     public boolean online(String fleet, String robot, String runtime, long ttl) {

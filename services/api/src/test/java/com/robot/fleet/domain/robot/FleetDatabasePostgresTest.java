@@ -289,4 +289,56 @@ class FleetDatabasePostgresTest {
         }
     }
 
+    @Test @DisplayName("정적 로봇 조회의 조건과 맞는 partial index를 생성한다")
+    void migrate_IndexesStaticProjectionRows() throws Exception {
+        // given, when
+        String definition=jdbc.queryForObject("SELECT indexdef FROM pg_indexes WHERE schemaname=? AND indexname='idx_robot_latest_static'",String.class,schema);
+        // then
+        assertThat(definition).contains("(robot_id)", "runtime_id", "WHERE");
+        try (var connection=source.getConnection()) {
+            var explain=connectionJdbc(connection);
+            explain.execute("SET enable_seqscan=off");
+            String plan=String.join("\n",explain.queryForList("EXPLAIN SELECT DISTINCT robot_id FROM robot_latest WHERE runtime_id=''",String.class));
+            assertThat(plan).contains("idx_robot_latest_static");
+        }
+    }
+
+    @Test @EnabledIfEnvironmentVariable(named="WORKER_ROLE_TEST_ENABLED",matches="1")
+    @DisplayName("제한된 Worker 역할은 문서화된 투영 권한을 받아야 이력과 투영을 함께 적재한다")
+    void projection_RequiresAndAcceptsLimitedWorkerGrants() throws Exception {
+        // given: 테스트가 만든 NOLOGIN 역할만 사용한다.
+        String role="worker_test_"+UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE ROLE "+role+" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT");
+        try {
+            jdbc.execute("REVOKE EXECUTE ON FUNCTION project_robot_latest() FROM PUBLIC");
+            jdbc.execute("GRANT USAGE ON SCHEMA "+schema+" TO "+role);
+            jdbc.execute("GRANT INSERT,SELECT ON telemetry_pose TO "+role);
+            jdbc.execute("GRANT USAGE ON SEQUENCE telemetry_pose_id_seq TO "+role);
+            jdbc.execute("GRANT EXECUTE ON FUNCTION project_robot_latest() TO "+role);
+            var timestamp=now();
+            var eventId=UUID.randomUUID();
+            try(var c=source.getConnection()) {
+                var restricted=connectionJdbc(c);
+                restricted.execute("SET ROLE "+role);
+                // when, then: projection permission failure rolls back the history row too.
+                assertThatThrownBy(()->pose(restricted,"limited",null,eventId,timestamp,1))
+                        .isInstanceOf(org.springframework.dao.DataAccessException.class);
+                assertThat(jdbc.queryForObject("SELECT count(*) FROM telemetry_pose WHERE robot_id='limited'",Integer.class)).isZero();
+                // when
+                jdbc.execute("GRANT SELECT,INSERT,UPDATE ON robot_latest TO "+role);
+                pose(restricted,"limited",null,eventId,timestamp,1);
+                pose(restricted,"limited",null,UUID.randomUUID(),timestamp.plusSeconds(1),2);
+                // then
+                assertThat(snapshots.find("limited").orElseThrow().pose().x()).isEqualTo(2);
+                assertThat(jdbc.queryForObject("SELECT count(*) FROM telemetry_pose WHERE robot_id='limited'",Integer.class)).isEqualTo(2);
+            }
+        } finally {
+            jdbc.execute("REVOKE ALL ON ALL TABLES IN SCHEMA "+schema+" FROM "+role);
+            jdbc.execute("REVOKE ALL ON ALL SEQUENCES IN SCHEMA "+schema+" FROM "+role);
+            jdbc.execute("REVOKE ALL ON FUNCTION project_robot_latest() FROM "+role);
+            jdbc.execute("REVOKE ALL ON SCHEMA "+schema+" FROM "+role);
+            jdbc.execute("DROP ROLE "+role);
+        }
+    }
+
 }

@@ -143,8 +143,13 @@ class TelemetryStreamServiceTest {
             // then
             assertThat(original.values).hasSize(3);
             // when
-            stream.broadcast(new OfflineTelemetryDto("offline","robot_1",at.plusSeconds(1),"current",new StatusTelemetryDataDto("offline")));
+            var next = new OfflineTelemetryDto("offline","robot_1",at.plusSeconds(1),"current",new StatusTelemetryDataDto("offline"));
+            stream.broadcast(next);
             awaitValues(original,4);awaitValues(fresh,2);
+            var mapper = new ObjectMapper().findAndRegisterModules();
+            assertThat(original.values.get(3)).isEqualTo(mapper.writeValueAsString(next));
+            assertThat(original.values.get(3)).isNotEqualTo(original.values.get(2));
+            assertThat(fresh.values.get(1)).isNotEqualTo(fresh.values.get(0));
         }
     }
 

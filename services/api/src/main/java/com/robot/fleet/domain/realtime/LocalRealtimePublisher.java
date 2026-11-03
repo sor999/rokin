@@ -14,7 +14,10 @@ import org.springframework.stereotype.Component;
 public class LocalRealtimePublisher implements RealtimePublisher {
     private final TelemetryStreamService stream;
     private final SimpMessagingTemplate messaging;
+    private final com.robot.fleet.domain.presence.service.PresenceService presence;
 
-    public void telemetry(String eventId, TelemetryEvent event) { stream.broadcast(event); }
+    public void telemetry(String eventId, TelemetryEvent event) {
+        if (presence.online(event.robotId(), event.runtimeId())) stream.broadcast(event);
+    }
     public void ack(AckDto event) { messaging.convertAndSend("/topic/ack/" + event.robotId(), event); }
 }
