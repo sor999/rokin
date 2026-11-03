@@ -124,3 +124,7 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - 테스트는 실제 PostgreSQL 락 대기를 확인하며 임시 스키마 안에서만 데이터를 생성한다.
 - H2의 최신 읽기 테스트는 테스트 뷰로 계약만 검증한다. 실제 트리거 및 공유 락은 별도다.
 - 측정과 환경 복구는 [Fleet DB 확장성](../features/fleet-database-scalability.md)을 따른다.
+- API PostgreSQL 워크플로는 Java 25와 PostgreSQL 15 서비스에서 테스트와 bootJar를 실행한다.
+  PRESENCE_TEST_URL과 FENCE_TEST_URL을 설정해 트리거와 실제 락 검증을 생략하지 않는다.
+- 제한 Worker 역할 검증은 WORKER_ROLE_TEST_ENABLED=1에서만 실행한다. 전용 테스트 DB의
+  역할 생성 권한이 필요하며 테스트가 만든 NOLOGIN 역할과 권한은 종료 시 정리한다.
