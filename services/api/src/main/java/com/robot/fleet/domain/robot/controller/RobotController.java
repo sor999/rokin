@@ -18,8 +18,9 @@ public class RobotController {
     private final RobotQueryService queryService;
 
     @GetMapping
-    public List<RobotStatusDto> getAllRobots() {
-        return queryService.getAllRobots();
+    public List<RobotStatusDto> getAllRobots(@RequestParam(defaultValue = "") String after,
+                                             @RequestParam(required = false) Integer limit) {
+        return queryService.getRobots(after, limit);
     }
 
     @GetMapping("/{robotId}/pose/latest")

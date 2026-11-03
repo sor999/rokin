@@ -116,3 +116,11 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
   적용하고 분산 판정, 재시작, 중복, 동시 갱신, runtime 교체, 만료와 명령 차단을 검증한다.
 - Dashboard는 연결 오류 시 온라인 해제와 스냅샷 및 SSE 경쟁을 검증한다.
 - 실제 API 2대와 DB 및 ROS 재시작 검증은 [공유 상태 문서](../features/shared-presence.md)를 따른다.
+
+## Fleet DB 확장성 검증
+
+- FleetDatabasePostgresTest는 `PRESENCE_TEST_URL`에서 실제 투영 트리거, backfill과 롤백,
+  일괄 쿼리 수, 페이지, 생성 상한과 ID 중복, 보고 및 삭제 및 runtime 교체 경쟁을 검증한다.
+- 테스트는 실제 PostgreSQL 락 대기를 확인하며 임시 스키마 안에서만 데이터를 생성한다.
+- H2의 최신 읽기 테스트는 테스트 뷰로 계약만 검증한다. 실제 트리거 및 공유 락은 별도다.
+- 측정과 환경 복구는 [Fleet DB 확장성](../features/fleet-database-scalability.md)을 따른다.

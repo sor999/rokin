@@ -13,7 +13,7 @@ public class PresenceRepository {
     public record Expired(String robotId, String runtimeId, OffsetDateTime observedAt) { }
     private final JdbcTemplate jdbc;
 
-    private static final String CURRENT_OWNER = """
+    public static final String CURRENT_OWNER = """
             (NOT EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id)
                 AND p.runtime_id = ''
              OR EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id
@@ -22,7 +22,7 @@ public class PresenceRepository {
                     WHERE r.fleet_id = p.fleet_id ORDER BY r.epoch DESC LIMIT 1)))
             """;
 
-    private static final String READY = """
+    public static final String READY = """
             (NOT EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id)
              OR EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id
                 AND s.runtime_id = p.runtime_id AND s.runtime_state = 'RUNNING'
@@ -37,16 +37,19 @@ public class PresenceRepository {
                         LEAST(CAST(? AS TIMESTAMP WITH TIME ZONE), d.now), CAST(? AS TIMESTAMP WITH TIME ZONE)
                     FROM decision d WHERE CAST(? AS TIMESTAMP WITH TIME ZONE) >= d.now - (? * INTERVAL '1' SECOND)
                         AND CAST(? AS TIMESTAMP WITH TIME ZONE) <= d.now + INTERVAL '5' SECOND
+                ), eligible AS (SELECT p.* FROM input p WHERE
+                """ + CURRENT_OWNER + """
                 ), saved AS (
                     INSERT INTO robot_presence AS p (fleet_id, robot_id, runtime_id, observed_at, source_timestamp)
-                    SELECT * FROM input
+                    SELECT * FROM eligible
                     ON CONFLICT (fleet_id, robot_id, runtime_id) DO UPDATE
-                        SET observed_at = GREATEST(p.observed_at, EXCLUDED.observed_at),
-                            source_timestamp = EXCLUDED.source_timestamp
-                        WHERE EXCLUDED.source_timestamp > p.source_timestamp
-                    RETURNING 1
-                ) SELECT EXISTS(SELECT 1 FROM input)
-                """, Boolean.class, fleet, robot, runtime == null ? "" : runtime, timestamp, timestamp, timestamp, ttl, timestamp));
+                        SET observed_at = CASE WHEN EXCLUDED.source_timestamp > p.source_timestamp
+                            THEN GREATEST(p.observed_at, EXCLUDED.observed_at) ELSE p.observed_at END,
+                            source_timestamp = GREATEST(p.source_timestamp, EXCLUDED.source_timestamp)
+                    RETURNING p.fleet_id,p.robot_id,p.runtime_id,p.observed_at,p.source_timestamp
+                ) SELECT EXISTS(SELECT 1 FROM saved p CROSS JOIN decision d
+                    WHERE p.observed_at >= d.now - (? * INTERVAL '1' SECOND) AND
+                """ + READY + ")", Boolean.class, fleet, robot, runtime == null ? "" : runtime, timestamp, timestamp, timestamp, ttl, timestamp, ttl));
     }
 
     public boolean online(String fleet, String robot, String runtime, long ttl) {

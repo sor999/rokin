@@ -15,10 +15,9 @@ class RealtimeIngressTest {
         var simulations = mock(SimulationService.class);
         when(simulations.acceptsTelemetry("robot_1", null)).thenReturn(true);
         var presence = mock(com.robot.fleet.domain.presence.service.PresenceService.class);
-        var listener = new TelemetryKafkaListener(publisher, new ObjectMapper().findAndRegisterModules(), presence, simulations);
+        var listener = new TelemetryKafkaListener(publisher, new ObjectMapper().findAndRegisterModules(), presence);
         String json = "{\"event_id\":\"0b181550-d9e4-4a66-8e0b-360d71dbece4\",\"robot_id\":\"robot_1\",\"timestamp\":\"2026-11-02T00:00:00Z\",\"data\":{\"x\":1,\"y\":2}}";
         when(presence.observe(any())).thenReturn(true);
-        when(presence.online(anyString(), nullable(String.class))).thenReturn(true);
         doThrow(new IllegalStateException("transport unavailable")).when(publisher).telemetry(anyString(), any());
         // when, then
         assertThatThrownBy(() -> listener.handlePoseTelemetry(json)).isInstanceOf(IllegalStateException.class);
@@ -33,7 +32,7 @@ class RealtimeIngressTest {
         var mapper = new ObjectMapper().findAndRegisterModules();
         var simulations = mock(SimulationService.class);
         when(simulations.acceptsTelemetry("robot_1", null)).thenReturn(true);
-        var listener = new TelemetryKafkaListener(publisher, mapper, mock(com.robot.fleet.domain.presence.service.PresenceService.class), simulations);
+        var listener = new TelemetryKafkaListener(publisher, mapper, mock(com.robot.fleet.domain.presence.service.PresenceService.class));
         var json = mapper.createObjectNode();
         json.put("event_id", java.util.UUID.randomUUID().toString());
         json.put("robot_id", "robot_1");

@@ -24,7 +24,6 @@ public class TelemetryKafkaListener {
     private final RealtimePublisher publisher;
     private final ObjectMapper objectMapper;
     private final com.robot.fleet.domain.presence.service.PresenceService presence;
-    private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
 
     private <T> void handleTelemetryMessage(
             String payload,
@@ -47,9 +46,7 @@ public class TelemetryKafkaListener {
             log.warn("[Listener] Invalid {} message: {}", type, e.getClass().getSimpleName());
             return;
         }
-        if (!simulations.acceptsTelemetry(event.robotId(), event.runtimeId())) return;
         if (!presence.observe(event)) return;
-        if (!presence.online(event.robotId(), event.runtimeId())) return;
         publisher.telemetry(eventId, event);
     }
 

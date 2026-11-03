@@ -82,3 +82,10 @@ Kafka를 소비한 API가 PostgreSQL presence에 관측 시각을 저장하고 �
 현재 runtime, 준비 상태, heartbeat 및 관측 만료를 함께 확인한다. Redis와 SSE 전송은
 온라인 유효기간을 갱신하지 않는다. 저장소 장애 시 명령을 거부하며 복구와 시계 계약은
 [ADR 0006](docs/decisions/0006-shared-presence.md)을 따른다.
+
+## 최신 상태 조회와 Fleet 등록 동시성
+
+Worker의 이력 INSERT와 같은 DB 트랜잭션에서 최신 상태 투영을 갱신한다. 목록은 투영과
+공유 온라인 상태를 한 번에 읽으며, 등록과 runtime 변경은 Fleet별로 조정한다.
+소유권 확인은 DB 기준을 유지하고 TTL 캐시를 추가하지 않는다. 갱신 순서와 배포 전환은
+[ADR 0007](docs/decisions/0007-fleet-database-scalability.md)을 따른다.

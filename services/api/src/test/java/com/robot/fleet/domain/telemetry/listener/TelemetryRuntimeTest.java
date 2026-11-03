@@ -15,7 +15,7 @@ class TelemetryRuntimeTest {
     private final PresenceService presence = mock(PresenceService.class);
     private final SimulationService simulations = mock(SimulationService.class);
     private final TelemetryKafkaListener listener = new TelemetryKafkaListener(publisher,
-            new ObjectMapper().findAndRegisterModules(), presence, simulations);
+            new ObjectMapper().findAndRegisterModules(), presence);
     private final String json = """
             {"event_id":"0b181550-d9e4-4a66-8e0b-360d71dbece4","robot_id":"robot",
              "timestamp":"2020-01-01T00:00:00Z","simulation_runtime_id":"current","data":{"x":1,"y":2}}
@@ -30,7 +30,7 @@ class TelemetryRuntimeTest {
         listener.handlePoseTelemetry(json.replace("current", "old"));
         listener.handlePoseTelemetry(json);
         // then
-        verify(presence, times(1)).observe(any());
+        verify(presence, times(2)).observe(any());
         verifyNoInteractions(publisher);
     }
 
@@ -47,8 +47,7 @@ class TelemetryRuntimeTest {
     void handle_RequiresSharedReadinessBeforePublish() {
         // given
         when(simulations.acceptsTelemetry("robot", "current")).thenReturn(true);
-        when(presence.observe(any())).thenReturn(true);
-        when(presence.online("robot", "current")).thenReturn(false).thenReturn(true);
+        when(presence.observe(any())).thenReturn(false).thenReturn(true);
         // when
         listener.handlePoseTelemetry(json);
         // then
