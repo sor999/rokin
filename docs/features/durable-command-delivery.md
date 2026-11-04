@@ -28,6 +28,8 @@
 
 ## 검증
 
-PRESENCE_TEST_URL을 설정해 DurableCommandPostgresTest를 실행한다.
+PRESENCE_TEST_URL과 선택 PRESENCE_TEST_USER 및 PRESENCE_TEST_PASSWORD를 설정해 DurableCommandPostgresTest를 실행한다.
 Worker는 TEST_DATABASE_URL에서 TestDurableAckReceiptAtomicity를 실행한다.
 기본 H2 테스트만으로 PostgreSQL 임대와 경쟁 검증을 대체하지 않는다.
+
+STOMP 검증 실패는 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다. cmdId는 null이다. STORAGE_UNAVAILABLE은 접수 여부가 불명확할 수 있으므로 요청 키 조회를 유지한다.
