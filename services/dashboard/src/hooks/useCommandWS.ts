@@ -63,8 +63,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
             if (res.status === "rejected") {
               if (!res.requestId || !durableRef.current?.all().some(entry => entry.requestId === res.requestId)) return;
               setLastResult(res);
-              if (res.errorCode !== "STORAGE_UNAVAILABLE") {
-                durableRef.current.finish(res.requestId);
+              if (durableRef.current.rejected(res.requestId, res.errorCode)) {
                 recoveryRef.current.rejected(res.requestId);
               }
               return;
@@ -112,7 +111,10 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
           if (!active) return;
           if (!status) {
             // Legacy commands have no outbox entry; retain their key until a real terminal Ack.
-            if (entry.cmdId && terminalKnown.has(entry.cmdId)) durableRef.current?.finish(entry.requestId);
+            if (entry.cmdId && terminalKnown.has(entry.cmdId)) {
+              durableRef.current?.finish(entry.requestId);
+              terminalKnown.delete(entry.cmdId);
+            }
             continue;
           }
           if (status.robotId !== robotId) continue;
@@ -123,7 +125,10 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
           setLastResult(result);
           if (status.ack) setLastAck(previous => previous?.cmdId === status.cmdId &&
             (previous.status === "done" || previous.status === "failed") ? previous : status.ack);
-          if (status.deliveryStatus === "COMPLETED" || status.deliveryStatus === "EXPIRED") durableRef.current?.finish(entry.requestId);
+          if (status.deliveryStatus === "COMPLETED" || status.deliveryStatus === "EXPIRED") {
+            durableRef.current?.finish(entry.requestId);
+            terminalKnown.delete(status.cmdId);
+          }
         }
         await pollCommandAcks(recoveryRef.current,
           (id, signal) => fetchCommandAck(robotId, id, signal),
