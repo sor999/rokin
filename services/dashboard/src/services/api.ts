@@ -61,3 +61,10 @@ export async function fetchCommandAck(robotId: string, cmdId: string, signal?: A
   if (!response.ok) throw new Error(`Ack 조회 실패 (${response.status})`);
   return response.json() as Promise<AckDto>;
 }
+
+export async function fetchCommandByKey(key: string, signal?: AbortSignal): Promise<import("@/types").DurableCommandStatus | null> {
+  const response = await fetch(`${BASE}/commands?idempotencyKey=${encodeURIComponent(key)}`, { signal, cache: "no-store" });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`명령 조회 실패 (${response.status})`);
+  return response.json() as Promise<import("@/types").DurableCommandStatus>;
+}

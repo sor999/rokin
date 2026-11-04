@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
-import { fetchCommandAck } from "@/services/api";
+import { DurableRequests } from "@/lib/durableRequests";
+import { fetchCommandByKey, fetchCommandAck } from "@/services/api";
 import { CommandRecovery } from "@/lib/commandRecovery";
 import { pollCommandAcks } from "@/lib/pollCommandAcks";
 import type { AckDto, CommandResult } from "@/types";
@@ -29,9 +30,16 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
   const recoveryRef = useRef(new CommandRecovery());
   const clientRef = useRef<Client | null>(null);
+  const durableRef = useRef<DurableRequests | null>(null);
 
   useEffect(() => {
     recoveryRef.current = new CommandRecovery();
+    durableRef.current = new DurableRequests(sessionStorage, `robot-commands:${robotId}`);
+    for (const saved of durableRef.current.all()) {
+      recoveryRef.current.sent(saved.requestId);
+      if (saved.cmdId) recoveryRef.current.accepted({ requestId: saved.requestId, cmdId: saved.cmdId, robotId, status: "accepted" });
+    }
+    let recoveryCursor = 0;
     setIsConnected(false);
     setLastAck(null);
     setLastResult(null);
@@ -50,7 +58,10 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
           if (!active) return;
           try {
             const res = JSON.parse(msg.body) as CommandResult;
-            if (res.robotId === robotId && recoveryRef.current.accepted(res)) setLastResult(res);
+            if (res.robotId === robotId && recoveryRef.current.accepted(res)) {
+              if (res.requestId) durableRef.current?.accepted(res.requestId, res.cmdId);
+              setLastResult(res);
+            }
           } catch { /* 무시 */ }
         });
 
@@ -59,7 +70,10 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
           if (!active) return;
           try {
             const ack = JSON.parse(msg.body) as AckDto;
-            if (recoveryRef.current.apply(ack)) setLastAck(ack);
+            if (recoveryRef.current.apply(ack)) {
+              setLastAck(ack);
+              if (ack.status === "done" || ack.status === "failed") durableRef.current?.completed(ack.cmdId);
+            }
           } catch { /* 무시 */ }
         });
       },
@@ -72,14 +86,33 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
     clientRef.current = client;
 
     const recover = async () => {
-      const ids = recoveryRef.current.pending();
-      if (!active || !ids.length || request) return;
+      if (!active || request) return;
       const current = new AbortController();
       request = current;
       try {
+        // Bounded batches also recover a command whose initial STOMP response was lost.
+        const all = durableRef.current?.all() ?? [];
+        const saved = all.slice(recoveryCursor, recoveryCursor + 4);
+        recoveryCursor = recoveryCursor + 4 >= all.length ? 0 : recoveryCursor + 4;
+        for (const entry of saved) {
+          if (!active || current.signal.aborted) return;
+          const status = await fetchCommandByKey(entry.idempotencyKey, AbortSignal.any([current.signal, AbortSignal.timeout(3000)]));
+          if (!active || !status || status.robotId !== robotId) continue;
+          const result: CommandResult = { requestId: entry.requestId, cmdId: status.cmdId, robotId,
+            status: "accepted", deliveryStatus: status.deliveryStatus };
+          recoveryRef.current.accepted(result);
+          durableRef.current?.accepted(entry.requestId, status.cmdId);
+          setLastResult(result);
+          if (status.ack) setLastAck(previous => previous?.cmdId === status.cmdId &&
+            (previous.status === "done" || previous.status === "failed") ? previous : status.ack);
+          if (status.deliveryStatus === "COMPLETED" || status.deliveryStatus === "EXPIRED") durableRef.current?.finish(entry.requestId);
+        }
         await pollCommandAcks(recoveryRef.current,
           (id, signal) => fetchCommandAck(robotId, id, signal),
-          (ack) => { if (active) setLastAck(ack); }, current.signal);
+          (ack) => { if (active) {
+            setLastAck(ack);
+            if (ack.status === "done" || ack.status === "failed") durableRef.current?.completed(ack.cmdId);
+          } }, current.signal);
       } catch { /* DB 적재 지연과 일시 장애는 다음 조회에서 재시도한다. */ }
       finally { if (request === current) request = null; }
     };
@@ -99,18 +132,21 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
       if (!client?.connected || !recoveryRef.current.canSend()) return null;
 
       const requestId = crypto.randomUUID();
+      const idempotencyKey = crypto.randomUUID();
+      if (!durableRef.current?.add(requestId, idempotencyKey)) return null;
+      recoveryRef.current.sent(requestId);
       try {
         client.publish({
           destination: "/app/command",
           body: JSON.stringify({
             requestId,
+            idempotencyKey,
             robotId: rid,
             command,
             data,
             issuedBy: "dashboard",
           }),
         });
-        recoveryRef.current.sent(requestId);
         return requestId;
       } catch {
         setIsConnected(false);

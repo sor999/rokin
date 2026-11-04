@@ -119,6 +119,7 @@ services:
       FLEET_ID: ${FLEET_ID:-default}
       SIMULATOR_INTERNAL_TOKEN: ${SIMULATOR_INTERNAL_TOKEN:?Set SIMULATOR_INTERNAL_TOKEN for API and ROS}
       SIMULATOR_MAX_ROBOTS: ${SIMULATOR_MAX_ROBOTS:-20}
+      COMMAND_DURABLE_ENABLED: ${COMMAND_DURABLE_ENABLED:-false}
     ports:
       - "${API_PORT:-8080}:8080"
     healthcheck:
@@ -147,6 +148,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-telemetry}
       KAFKA_BROKER_URL: kafka:29092
+      COMMAND_DURABLE_ENABLED: ${COMMAND_DURABLE_ENABLED:-false}
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID:-telemetry-worker}
       KAFKA_TOPICS: ${KAFKA_TOPICS:-telemetry.pose,telemetry.battery,telemetry.status,ack.robot}
       DLQ_TOPIC: ${DLQ_TOPIC:-dlq.telemetry}
@@ -170,10 +172,16 @@ services:
         condition: service_started
     environment:
       ROS_DOMAIN_ID: 0
+      COMMAND_DURABLE_ENABLED: ${COMMAND_DURABLE_ENABLED:-false}
+      COMMAND_JOURNAL_PATH: /var/lib/robot-delivery/journal.sqlite3
+      COMMAND_JOURNAL_MAX_PENDING: ${COMMAND_JOURNAL_MAX_PENDING:-10000}
+      COMMAND_JOURNAL_BUDGET_BYTES: ${COMMAND_JOURNAL_BUDGET_BYTES:-1073741824}
       FLEET_ID: ${FLEET_ID:-default}
       SIMULATOR_INTERNAL_TOKEN: ${SIMULATOR_INTERNAL_TOKEN:?Set SIMULATOR_INTERNAL_TOKEN for API and ROS}
       SIMULATOR_API_URL: http://api:8080
       KAFKA_BROKER_URL: kafka:29092
+    volumes:
+      - robot_delivery_data:/var/lib/robot-delivery
     command: ["ros2", "run", "ros_kafka_bridge", "simulation_manager"]
     networks:
       - robot_net
@@ -278,6 +286,7 @@ networks:
     driver: bridge
 
 volumes:
+  robot_delivery_data:
   postgres_data:
   prometheus_data:
   grafana_data:

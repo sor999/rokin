@@ -203,6 +203,13 @@ export function CommandPanel({
           </Button>
         </div>
 
+        {lastResult?.deliveryStatus && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {{ PENDING: "명령 접수됨, 전달 대기 중", RECEIVED: "로봇 수신 확인됨", EXPIRED: "실행 시작 전 만료됨",
+              OUTCOME_UNKNOWN: "결과 확인 불가, 이전 이동은 자동 재전송하지 않습니다", COMPLETED: "로봇 결과 저장 확인됨" }[lastResult.deliveryStatus]}
+          </p>
+        )}
+
         {/* 명령 상태 */}
         {cmdState !== "idle" && (
           <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">

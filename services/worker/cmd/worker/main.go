@@ -52,6 +52,11 @@ func main() {
 	if err := repository.CheckSchema(ctx, pool); err != nil {
 		log.Fatalf("DB 스키마 확인 실패: %v", err)
 	}
+	if os.Getenv("COMMAND_DURABLE_ENABLED") == "true" {
+		if _, err := pool.Exec(ctx, "SELECT event_id, cmd_id FROM command_ack_receipt LIMIT 0"); err != nil {
+			log.Fatalf("영속 전달 Flyway 스키마 확인 실패: %v", err)
+		}
+	}
 	log.Println("[Main] Flyway 스키마 확인 완료")
 
 	// Kafka Consumer 초기화

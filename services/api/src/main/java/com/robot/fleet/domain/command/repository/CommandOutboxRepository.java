@@ -50,4 +50,15 @@ public class CommandOutboxRepository {
     public boolean receipt(String fleet, UUID event) {
         return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM command_ack_receipt a JOIN command_outbox c ON c.cmd_id=a.cmd_id WHERE c.fleet_id=? AND a.event_id=?)", Boolean.class, fleet, event));
     }
+    public double count(String fleet, String state) {
+        String condition=switch(state) {
+            case "pending" -> "received_at IS NULL AND expires_at>clock_timestamp()";
+            case "expired" -> "received_at IS NULL AND expires_at<=clock_timestamp() AND attempts=0";
+            default -> "outcome_unknown OR (received_at IS NULL AND expires_at<=clock_timestamp() AND attempts>0)";
+        };
+        return jdbc.queryForObject("SELECT count(*) FROM command_outbox WHERE fleet_id=? AND ("+condition+")", Double.class, fleet);
+    }
+    public double oldest(String fleet) {
+        return jdbc.queryForObject("SELECT COALESCE(EXTRACT(EPOCH FROM clock_timestamp()-MIN(created_at)),0) FROM command_outbox WHERE fleet_id=? AND received_at IS NULL",Double.class,fleet);
+    }
 }
