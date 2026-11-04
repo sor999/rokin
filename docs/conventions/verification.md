@@ -128,3 +128,11 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
   PRESENCE_TEST_URL과 FENCE_TEST_URL을 설정해 트리거와 실제 락 검증을 생략하지 않는다.
 - 제한 Worker 역할 검증은 WORKER_ROLE_TEST_ENABLED=1에서만 실행한다. 전용 테스트 DB의
   역할 생성 권한이 필요하며 테스트가 만든 NOLOGIN 역할과 권한은 종료 시 정리한다.
+
+## 명령 영속 전달 검증
+
+- API: PRESENCE_TEST_URL에서 DurableCommandPostgresTest 실행
+- Worker: TEST_DATABASE_URL에서 TestDurableAckReceiptAtomicity 실행
+- ROS: test_durability.py와 test_durable_delivery.py로 디스크 복구 및 최종 확인 전 보존 검증
+- Dashboard: durableRequests 테스트로 요청 키 복원, 저장 실패와 추적 상한 검증
+- 실제 강제 종료와 저장소 중단은 [영속 전달 문서](../features/durable-command-delivery.md)의 opt-in 시나리오에서 실행

@@ -70,9 +70,14 @@ class RobotCommands:
             y = float(data.get('y', self.logic.y))
             if not math.isfinite(x) or not math.isfinite(y):
                 raise ValueError('move_to requires finite coordinates')
+            interrupted = self.pending_move_id
             self.logic.set_target(x, y)
             self.pending_move_id = cmd_id
-            return [CommandAck(cmd_id, 'accepted', f'Moving to ({x}, {y})')]
+            results = []
+            if interrupted is not None:
+                results.append(CommandAck(interrupted, 'failed', 'Movement interrupted by newer command'))
+            results.append(CommandAck(cmd_id, 'accepted', f'Moving to ({x}, {y})'))
+            return results
 
         return [CommandAck(cmd_id, 'failed', f'Unknown command: {command}')]
 

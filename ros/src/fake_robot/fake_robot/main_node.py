@@ -8,6 +8,9 @@ import datetime
 
 from .logic import FakeRobotLogic
 from .commands import RobotCommands
+from .durability import journal_from_env
+import os
+import sqlite3
 
 class FakeRobotNode(Node):
     def __init__(self, node_name='fake_robot_node', **kwargs):
@@ -15,6 +18,7 @@ class FakeRobotNode(Node):
 
         # Declare parameters
         self.declare_parameter('robot_id', 'robot_1')
+        self.declare_parameter('simulation_runtime_id', '')
         self.declare_parameter('publish_rate_hz', 2.0)
         self.declare_parameter('speed', 1.0)
         self.declare_parameter('start_x', 0.0)
@@ -24,7 +28,12 @@ class FakeRobotNode(Node):
         self.declare_parameter('command_dedup_max_entries', 10000)
 
         # Get parameters
+        self.journal = journal_from_env()
+        self.delivery_healthy = True
+        self.fleet_id = os.environ.get('FLEET_ID', 'default')
         self.robot_id = self.get_parameter('robot_id').value
+        if self.journal:
+            self.journal.recover(self.fleet_id, self.robot_id)
         publish_rate_hz = self.get_parameter('publish_rate_hz').value
         speed = self.get_parameter('speed').value
         start_x = self.get_parameter('start_x').value
@@ -89,11 +98,37 @@ class FakeRobotNode(Node):
 
             self.get_logger().info(f"Received command: {command}")
 
-            for ack in self.commands.handle(cmd_id, command, data):
-                self._publish_ack(ack.cmd_id, ack.status, ack.message)
+            if self.journal:
+                if cmd_payload.get('fleet_id') != self.fleet_id or cmd_payload.get('robot_id') != self.robot_id:
+                    raise ValueError('Command belongs to another robot')
+                runtime = self.get_parameter('simulation_runtime_id').value
+                if runtime and cmd_payload.get('simulation_runtime_id') != runtime:
+                    raise ValueError('Command belongs to a previous runtime')
+                for ack in self.journal.execute(cmd_payload, lambda: self.commands.handle(cmd_id, command, data)):
+                    self._publish_durable_ack(ack)
+            else:
+                for ack in self.commands.handle(cmd_id, command, data):
+                    self._publish_ack(ack.cmd_id, ack.status, ack.message)
 
-        except (ValueError, TypeError, AttributeError, OverflowError) as error:
+        except (sqlite3.Error, OSError, RuntimeError) as error:
+            self.delivery_healthy = False
+            self.logic.stop()
+            self.get_logger().error(f'Durable command storage unavailable: {type(error).__name__}')
+        except (ValueError, TypeError, AttributeError, OverflowError, KeyError) as error:
             self.get_logger().error(f"Invalid command: {error}")
+
+    def _publish_durable_ack(self, payload):
+        msg = String()
+        msg.data = json.dumps(payload, allow_nan=False)
+        self.ack_pub.publish(msg)
+
+    def destroy_node(self):
+        if self.journal:
+            try:
+                self.journal.recover(self.fleet_id, self.robot_id)
+            finally:
+                self.journal.close()
+        return super().destroy_node()
 
     def timer_callback(self):
         # Update logic
@@ -103,10 +138,15 @@ class FakeRobotNode(Node):
         ack = self.commands.complete_move()
         if ack is not None:
             x, y = self.logic.get_pose()
-            self._publish_ack(
-                ack.cmd_id, ack.status, ack.message,
-                {"x": x, "y": y}
-            )
+            if self.journal:
+                try:
+                    for payload in self.journal.record([ack], {"x": x, "y": y}):
+                        self._publish_durable_ack(payload)
+                except (sqlite3.Error, OSError, RuntimeError):
+                    self.delivery_healthy = False
+                    self.logic.stop()
+            else:
+                self._publish_ack(ack.cmd_id, ack.status, ack.message, {"x": x, "y": y})
 
         # Publish Pose
         x, y = self.logic.get_pose()

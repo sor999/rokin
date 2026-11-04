@@ -41,6 +41,7 @@ export interface RealtimeStatus {
 
 // WebSocket Command/Ack
 export interface CommandRequest {
+  idempotencyKey?: string;
   requestId?: string;
   robotId: string;
   command: string;
@@ -49,8 +50,11 @@ export interface CommandRequest {
 }
 
 export interface CommandResult {
+  deliveryStatus?: CommandDeliveryStatus;
+  errorCode?: string | null;
+  message?: string | null;
   requestId?: string | null;
-  cmdId: string;
+  cmdId: string | null;
   robotId: string;
   status: string;
 }
@@ -96,4 +100,13 @@ export interface CreateSimulation {
   startX: number;
   startY: number;
   speed: number;
+}
+
+export type CommandDeliveryStatus = "PENDING" | "RECEIVED" | "EXPIRED" | "OUTCOME_UNKNOWN" | "COMPLETED";
+export interface DurableCommandStatus {
+  cmdId: string;
+  robotId: string;
+  deliveryStatus: CommandDeliveryStatus;
+  expiresAt: string;
+  ack: AckDto | null;
 }

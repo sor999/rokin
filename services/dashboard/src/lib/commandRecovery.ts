@@ -30,8 +30,9 @@ export class CommandRecovery {
     this.requests.set(requestId, { cmdId: null, lastStatus: null, deadline: this.now() + this.pollingMillis });
     return true;
   }
+  rejected(requestId: string) { this.requests.delete(requestId); }
   accepted(result: CommandResult) {
-    if (!result.requestId) return false;
+    if (!result.requestId || !result.cmdId || result.status === "rejected") return false;
     const request = this.requests.get(result.requestId);
     if (!request || (request.cmdId && request.cmdId !== result.cmdId)) return false;
     request.cmdId = result.cmdId;

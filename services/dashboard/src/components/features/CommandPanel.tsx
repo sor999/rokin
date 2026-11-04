@@ -70,6 +70,11 @@ export function CommandPanel({
   useEffect(() => {
     if (!lastResult || lastResult.robotId !== robotId || !activeRequestId) return;
     if (lastResult.requestId !== activeRequestId) return;
+    if (lastResult.status === "rejected") {
+      setCmdState("failed");
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+      return;
+    }
     setActiveCmdId(lastResult.cmdId);
   }, [lastResult, robotId, activeRequestId]);
 
@@ -202,6 +207,18 @@ export function CommandPanel({
             Stop
           </Button>
         </div>
+
+        {lastResult?.status === "rejected" && lastResult.requestId === activeRequestId && (
+          <p role="alert" className="text-xs text-destructive">{lastResult.message ?? "명령 요청을 처리하지 못했습니다."}</p>
+        )}
+        {lastResult?.deliveryStatus && (!activeRequestId || lastResult.requestId === activeRequestId) && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {lastAck?.cmdId === lastResult.cmdId && (lastAck.status === "done" || lastAck.status === "failed") && lastResult.deliveryStatus !== "COMPLETED"
+              ? "로봇 완료 응답 수신, 저장 확인 중"
+              : { PENDING: "명령 접수됨, 전달 대기 중", RECEIVED: "로봇 수신 확인됨", EXPIRED: "실행 시작 전 만료됨",
+              OUTCOME_UNKNOWN: "결과 확인 불가, 이전 이동은 자동 재전송하지 않습니다", COMPLETED: "로봇 결과 저장 확인됨" }[lastResult.deliveryStatus]}
+          </p>
+        )}
 
         {/* 명령 상태 */}
         {cmdState !== "idle" && (

@@ -9,8 +9,10 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, String
 
 from .consumer import KafkaCommandConsumer
-from .commands import FleetCommandRouter, ManagedFleetCommandRouter
+from .commands import CommandRejected, FleetCommandRouter, ManagedFleetCommandRouter
 from .producer import KafkaTelemetryProducer
+from fake_robot.durability import journal_from_env
+from .durable_delivery import DurableBridgeDelivery
 
 
 class RosKafkaBridgeNode(Node):
@@ -48,6 +50,7 @@ class RosKafkaBridgeNode(Node):
             )
 
         self._runtime_id = runtime_id if managed else None
+        self.journal = journal_from_env()
         self._producer = KafkaTelemetryProducer(broker)
         self._cmd_publishers = {}
         self._subscriptions_by_robot = {}
@@ -62,6 +65,10 @@ class RosKafkaBridgeNode(Node):
             on_message=self._router.dispatch,
             dlq_topic=self.get_parameter('command_dlq_topic').value,
         )
+        self.delivery = DurableBridgeDelivery(self.journal, self._producer, self._router, self._cmd_publishers, self.get_logger()) if self.journal else None
+        if self.delivery:
+            self.create_timer(1.0, self.delivery.relay)
+            self.delivery.start()
         self._consumer.start()
 
         self.get_logger().info(
@@ -100,7 +107,7 @@ class RosKafkaBridgeNode(Node):
     def robot_ready(self, robot_id):
         """Kafka 할당과 로봇 명령·관측 DDS 경로가 모두 준비됐는지 확인한다."""
         publisher = self._cmd_publishers.get(robot_id)
-        return (self._consumer.ready.is_set() and publisher is not None
+        return ((not self.delivery or self.delivery.healthy()) and self._consumer.ready.is_set() and publisher is not None
                 and publisher.get_subscription_count() > 0
                 and all(self.count_publishers(subscription.topic_name) > 0
                         for subscription in self._subscriptions_by_robot[robot_id]))
@@ -151,13 +158,20 @@ class RosKafkaBridgeNode(Node):
         except json.JSONDecodeError:
             self.get_logger().warning(f"[Bridge] ack JSON 파싱 실패 (robot={robot_id})")
             return
-        self._producer.produce('ack.robot', key=robot_id, value=payload)
+        if not self.journal:
+            self._producer.produce('ack.robot', key=robot_id, value=payload)
 
     # Kafka → ROS 콜백
 
     def _on_kafka_command(self, cmd: dict) -> None:
         """Kafka cmd.robot에서 수신한 Command를 해당 로봇의 ROS 토픽으로 Relay한다."""
         robot_id = cmd['robot_id']
+        if self.journal:
+            try:
+                self.journal.enqueue(cmd)
+            except (ValueError, KeyError, TypeError) as error:
+                raise CommandRejected(str(error)) from error
+            return
 
         msg = String()
         msg.data = json.dumps(cmd)
@@ -172,6 +186,10 @@ class RosKafkaBridgeNode(Node):
         try:
             self._consumer.stop()
         finally:
+            if self.delivery:
+                self.delivery.stop()
+            if self.journal:
+                self.journal.close()
             try:
                 self._producer.flush()
             finally:

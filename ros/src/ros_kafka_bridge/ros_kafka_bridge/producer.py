@@ -10,7 +10,7 @@ class KafkaTelemetryProducer:
     """ROS 텔레메트리 데이터를 Kafka 토픽에 Produce하는 클래스."""
 
     def __init__(self, broker: str):
-        self._producer = Producer({'bootstrap.servers': broker})
+        self._producer = Producer({'bootstrap.servers': broker, 'enable.idempotence': True, 'acks': 'all'})
 
     def produce(self, topic: str, key: str, value: dict) -> None:
         """메시지를 지정한 Kafka 토픽에 비동기 Produce한다.

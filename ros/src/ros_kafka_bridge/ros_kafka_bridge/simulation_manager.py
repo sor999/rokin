@@ -79,7 +79,7 @@ class SimulationManager(Node):
     def start_robot(self, config):
         rid = config['robotId']
         node = FakeRobotNode(node_name='sim_' + rid, use_global_arguments=False, parameter_overrides=[
-            Parameter('robot_id', value=rid), Parameter('start_x', value=float(config['startX'])),
+            Parameter('robot_id', value=rid), Parameter('simulation_runtime_id', value=self.runtime_id), Parameter('start_x', value=float(config['startX'])),
             Parameter('start_y', value=float(config['startY'])), Parameter('speed', value=float(config['speed']))])
         try:
             with self.bridge._router.ownership_lock:
@@ -109,6 +109,12 @@ class SimulationManager(Node):
         except queue.Empty:
             return
         reports = self.reconciler.reconcile(snapshot)
+        if self.bridge.journal:
+            for report in reports:
+                node = self.robots.get(report['robotId'])
+                if node is not None and not node.delivery_healthy:
+                    report['state'] = 'FAILED'
+                    report['error'] = 'Durable command storage unavailable'
         self.replace_latest(self.reports, reports)
 
     def destroy_node(self):
