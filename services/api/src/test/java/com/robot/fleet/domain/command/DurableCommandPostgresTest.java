@@ -26,12 +26,14 @@ class DurableCommandPostgresTest {
     private SimulationService simulations;
     private DriverManagerDataSource source;
     private String url() { return System.getenv("PRESENCE_TEST_URL"); }
+    private String user() { return System.getenv().getOrDefault("PRESENCE_TEST_USER","postgres"); }
+    private String password() { return System.getenv().getOrDefault("PRESENCE_TEST_PASSWORD","rokin_test_only"); }
     @BeforeEach void setup() {
         schema="outbox_"+UUID.randomUUID().toString().replace("-","");
-        var flyway=Flyway.configure().dataSource(url(),"postgres","rokin_test_only").schemas(schema);
+        var flyway=Flyway.configure().dataSource(url(),user(),password()).schemas(schema);
         flyway.getPluginRegister().getPlugin(org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension.class).setTransactionalLock(false);
         flyway.load().migrate();
-        source=new DriverManagerDataSource(url()+(url().contains("?")?"&":"?")+"currentSchema="+schema,"postgres","rokin_test_only");
+        source=new DriverManagerDataSource(url()+(url().contains("?")?"&":"?")+"currentSchema="+schema,user(),password());
         jdbc=new JdbcTemplate(source); repo=new CommandOutboxRepository(jdbc); simulations=mock(SimulationService.class);
         when(simulations.commandContext(anyString())).thenReturn(Map.of("simulation_runtime_id","runtime","simulation_version",1));
         service=newService("default");
@@ -89,6 +91,13 @@ class DurableCommandPostgresTest {
         assertThatThrownBy(()->service.accept(request(UUID.randomUUID().toString()))).isInstanceOf(org.springframework.dao.DataAccessException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM command_sequence",Integer.class)).isZero();
+    }
+    @Test void publisherCrashLeaseCanBeReclaimedBeforeStopExpires() throws Exception {
+        UUID id=UUID.fromString(service.accept(request(UUID.randomUUID().toString())));
+        assertThat(repo.claim("default",UUID.randomUUID())).hasSize(1);
+        Thread.sleep(1200);
+        assertThat(repo.claim("default",UUID.randomUUID())).extracting(CommandOutboxRepository.Entry::cmdId).containsExactly(id);
+        assertThat(repo.now()).isBefore(repo.byId("default",id).orElseThrow().expiresAt());
     }
     @Test void expiryDoesNotFabricateRobotAck() {
         UUID id=UUID.fromString(service.accept(request(UUID.randomUUID().toString())));

@@ -28,18 +28,20 @@ public class CommandOutboxRepository {
         jdbc.update("INSERT INTO command_outbox(cmd_id,fleet_id,robot_id,idempotency_key,request_hash,payload,sequence,expires_at) VALUES (?,?,?,?,?,?,?,?)",
             id, fleet, robot, key, hash, payload, seq, expiry);
     }
-    public List<Entry> claim(String fleet, UUID token) {
+    public List<Entry> claim(String fleet, UUID token) { return claim(fleet,token,10); }
+    public List<Entry> claim(String fleet, UUID token, int limit) {
+        if (limit < 1 || limit > 10) throw new IllegalArgumentException("Invalid publisher capacity");
         return jdbc.query("""
             WITH candidates AS (
                 SELECT cmd_id FROM command_outbox WHERE fleet_id=? AND received_at IS NULL
                   AND expires_at>clock_timestamp() AND next_attempt_at<=clock_timestamp()
                   AND (lease_until IS NULL OR lease_until<clock_timestamp())
-                ORDER BY created_at LIMIT 10 FOR UPDATE SKIP LOCKED
-            ) UPDATE command_outbox o SET lease_token=?,lease_until=clock_timestamp()+interval '15 seconds',
+                ORDER BY expires_at,created_at LIMIT ? FOR UPDATE SKIP LOCKED
+            ) UPDATE command_outbox o SET lease_token=?,lease_until=clock_timestamp()+interval '1 second',
                 attempts=attempts+1 FROM candidates c WHERE o.cmd_id=c.cmd_id RETURNING o.*
             """, (rs,n) -> new Entry(rs.getObject("cmd_id", UUID.class), rs.getString("robot_id"),
                 rs.getString("request_hash"), rs.getString("payload"), rs.getObject("expires_at", OffsetDateTime.class),
-                rs.getObject("received_at", OffsetDateTime.class),rs.getInt("attempts"),rs.getBoolean("outcome_unknown")), fleet, token);
+                rs.getObject("received_at", OffsetDateTime.class),rs.getInt("attempts"),rs.getBoolean("outcome_unknown")), fleet, limit, token);
     }
     public void release(UUID cmd, UUID token) {
         jdbc.update("UPDATE command_outbox SET lease_until=NULL,lease_token=NULL,next_attempt_at=clock_timestamp()+interval '2 seconds' WHERE cmd_id=? AND lease_token=?", cmd, token);

@@ -51,8 +51,10 @@ export interface CommandRequest {
 
 export interface CommandResult {
   deliveryStatus?: CommandDeliveryStatus;
+  errorCode?: string | null;
+  message?: string | null;
   requestId?: string | null;
-  cmdId: string;
+  cmdId: string | null;
   robotId: string;
   status: string;
 }
