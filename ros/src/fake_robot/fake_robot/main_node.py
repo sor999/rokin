@@ -104,13 +104,7 @@ class FakeRobotNode(Node):
                 runtime = self.get_parameter('simulation_runtime_id').value
                 if runtime and cmd_payload.get('simulation_runtime_id') != runtime:
                     raise ValueError('Command belongs to a previous runtime')
-                apply, cached = self.journal.begin(cmd_payload)
-                if not apply:
-                    if cached:
-                        self._publish_durable_ack(cached)
-                    return
-                results = self.commands.handle(cmd_id, command, data)
-                for ack in self.journal.record(results):
+                for ack in self.journal.execute(cmd_payload, lambda: self.commands.handle(cmd_id, command, data)):
                     self._publish_durable_ack(ack)
             else:
                 for ack in self.commands.handle(cmd_id, command, data):
