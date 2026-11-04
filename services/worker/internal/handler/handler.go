@@ -25,6 +25,8 @@ type telemetryEnvelope struct {
 }
 
 type ackEnvelope struct {
+	EventID   string `json:"event_id"`
+	FleetID   string `json:"fleet_id"`
 	CmdID     string `json:"cmd_id"`
 	Timestamp string `json:"timestamp"`
 	RobotID   string `json:"robot_id"`
@@ -575,11 +577,35 @@ func parseAck(payload []byte) (repository.AckRow, error) {
 	if err != nil {
 		return repository.AckRow{}, fmt.Errorf("timestamp 파싱 실패: %w", err)
 	}
+	if env.EventID != "" {
+		if !validUUID(env.EventID) || !validUUID(env.CmdID) || env.FleetID == "" {
+			return repository.AckRow{}, fmt.Errorf("invalid durable Ack identity")
+		}
+	}
 	return repository.AckRow{
+		EventID: env.EventID, FleetID: env.FleetID,
 		CmdID:     env.CmdID,
 		Timestamp: ts,
 		RobotID:   env.RobotID,
 		Status:    env.Status,
 		Message:   env.Message,
 	}, nil
+}
+
+func validUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, char := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if char != '-' {
+				return false
+			}
+			continue
+		}
+		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
+			return false
+		}
+	}
+	return true
 }

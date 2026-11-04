@@ -85,3 +85,6 @@ logging:
 simulation:
   internal-token: ${SIMULATOR_INTERNAL_TOKEN:}
   max-robots: ${SIMULATOR_MAX_ROBOTS:20}
+
+command:
+  durable-enabled: ${COMMAND_DURABLE_ENABLED:false}

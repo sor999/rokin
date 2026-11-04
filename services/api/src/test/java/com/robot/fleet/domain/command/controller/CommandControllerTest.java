@@ -23,6 +23,50 @@ class CommandControllerTest {
     @InjectMocks
     private CommandController controller;
 
+    @Test void invalidCommandReturnsCorrelatedRejection() {
+        var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setRequestId("invalid-key");
+        given(commandService.sendCommand(request)).willThrow(new IllegalArgumentException("invalid UUID"));
+        var response=controller.handleCommand(request);
+        assertThat(response.requestId()).isEqualTo("invalid-key");assertThat(response.status()).isEqualTo("rejected");
+        assertThat(response.cmdId()).isNull();assertThat(response.errorCode()).isEqualTo("INVALID_REQUEST");
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("rejectionCases")
+    void commandFailuresReturnCorrelatedRejections(RuntimeException error, String expectedCode) {
+        var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setRequestId("failed-request");
+        given(commandService.sendCommand(request)).willThrow(error);
+        var result=controller.handleCommand(request);
+        assertThat(result.requestId()).isEqualTo("failed-request");assertThat(result.robotId()).isEqualTo("robot_1");
+        assertThat(result.status()).isEqualTo("rejected");assertThat(result.cmdId()).isNull();
+        assertThat(result.errorCode()).isEqualTo(expectedCode);
+        if (expectedCode.equals("STORAGE_UNAVAILABLE") || expectedCode.equals("DELIVERY_UNCERTAIN")) {
+            assertThat(result.message()).contains("자동으로 다시 보내지 마세요").doesNotContain("조회");
+        }
+    }
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> rejectionCases() {
+        return java.util.stream.Stream.of(
+            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.dao.DataAccessResourceFailureException("db down"),"STORAGE_UNAVAILABLE"),
+            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.transaction.TransactionSystemException("commit uncertain"),"STORAGE_UNAVAILABLE"),
+            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,"conflict"),"IDEMPOTENCY_CONFLICT"),
+            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"offline"),"COMMAND_UNAVAILABLE"),
+            org.junit.jupiter.params.provider.Arguments.of(new IllegalStateException("send failure"),"DELIVERY_UNCERTAIN")
+        );
+    }
+    @Test void keyedDurableStorageFailureProvidesSameKeyLookupOnly() {
+        var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setRequestId("keyed");
+        request.setIdempotencyKey("00000000-0000-0000-0000-000000000041");
+        given(commandService.sendCommand(request)).willThrow(new org.springframework.dao.DataAccessResourceFailureException("db"));
+        given(commandService.durableEnabled()).willReturn(true);
+        var result=controller.handleCommand(request);
+        assertThat(result.errorCode()).isEqualTo("STORAGE_UNAVAILABLE");
+        assertThat(result.message()).contains("동일한 idempotencyKey", "새 키로 다시 보내지 마세요");
+    }
+    @Test void keyDoesNotEnableLookupForLegacyCommands() {
+        var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setIdempotencyKey("key");
+        given(commandService.sendCommand(request)).willThrow(new org.springframework.dao.DataAccessResourceFailureException("db"));
+        var result=controller.handleCommand(request);
+        assertThat(result.message()).doesNotContain("조회").contains("불확실");
+    }
     @Test
     @DisplayName("정지 접수 응답에 요청 식별자를 포함하며 로봇 완료로 표시하지 않는다")
     void handleCommand_ReturnsStopRequestId() {

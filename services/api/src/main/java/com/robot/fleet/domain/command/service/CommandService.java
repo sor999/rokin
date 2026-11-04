@@ -39,7 +39,13 @@ public class CommandService {
         this.realtime = realtime;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DurableCommandService durable;
+
+    public boolean durableEnabled() { return durable != null && durable.enabled(); }
+
     public String sendCommand(CommandRequestDto request) {
+        if (durableEnabled()) return durable.accept(request);
         realtime.requireAvailable();
         Map<String, Object> context = simulations.commandContext(request.getRobotId());
         String cmdId = UUID.randomUUID().toString();
