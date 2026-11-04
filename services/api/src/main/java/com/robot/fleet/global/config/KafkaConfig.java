@@ -24,7 +24,11 @@ public class KafkaConfig {
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.ACKS_CONFIG, "all",
-                ProducerConfig.RETRIES_CONFIG, 3
+                ProducerConfig.RETRIES_CONFIG, 3,
+                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true,
+                ProducerConfig.MAX_BLOCK_MS_CONFIG, 1000,
+                ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 5000,
+                ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 3000
         ));
     }
 

@@ -12,6 +12,7 @@ import lombok.Setter;
 @NoArgsConstructor
 public class CommandRequestDto {
     private String requestId;
+    private String idempotencyKey;
     private String robotId;
     private String command;
     @JsonTypeInfo(

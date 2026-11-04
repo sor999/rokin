@@ -295,3 +295,48 @@ func TestCheckSchemaRequiresRuntimeMigration(t *testing.T) {
 		t.Fatal("expected missing V5 runtime columns")
 	}
 }
+
+func TestDurableAckReceiptAtomicity(t *testing.T) {
+	pool := testDatabase(t, 5)
+	ctx := context.Background()
+	migration, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "src", "main", "resources", "db", "migration", "V13__add_durable_commands.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	cmd := "00000000-0000-0000-0000-000000000041"
+	if _, err := pool.Exec(ctx, `INSERT INTO command_outbox(cmd_id,fleet_id,robot_id,request_hash,payload,sequence,expires_at) VALUES ($1,'default','robot-1','hash','{}',1,now()+interval '10 seconds')`, cmd); err != nil {
+		t.Fatal(err)
+	}
+	repo := New(pool)
+	row := ack(cmd, "done", 3)
+	row.FleetID = "default"
+	row.EventID = "00000000-0000-0000-0000-000000000042"
+	if err := repo.BatchInsertAck(ctx, []AckRow{row, row}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM command_ack_receipt").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("receipt count=%d err=%v", count, err)
+	}
+	late := row
+	late.Status = "accepted"
+	late.EventID = "00000000-0000-0000-0000-000000000043"
+	if err := repo.BatchInsertAck(ctx, []AckRow{late}); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT status FROM robot_ack_state WHERE cmd_id=$1", cmd).Scan(&state); err != nil || state != "done" {
+		t.Fatalf("state=%s err=%v", state, err)
+	}
+	wrong := row
+	wrong.Status = "failed"
+	if err := repo.BatchInsertAck(ctx, []AckRow{wrong}); err == nil {
+		t.Fatal("conflicting event identity must roll back")
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM command_ack_receipt").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("receipt count=%d err=%v", count, err)
+	}
+}

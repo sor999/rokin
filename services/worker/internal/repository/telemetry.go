@@ -37,6 +37,8 @@ type StatusRow struct {
 }
 
 type AckRow struct {
+	EventID   string
+	FleetID   string
 	CmdID     string
 	Timestamp time.Time
 	RobotID   string
@@ -111,6 +113,27 @@ func (r *Repository) BatchInsertAck(ctx context.Context, rows []AckRow) error {
 	}
 	batch := &pgx.Batch{}
 	for _, row := range rows {
+		if row.EventID != "" {
+			batch.Queue(`WITH eligible AS (
+                SELECT cmd_id FROM command_outbox WHERE cmd_id=$1 AND robot_id=$3 AND fleet_id=$7
+            ), transition AS (
+                INSERT INTO robot_ack_state(cmd_id,timestamp,robot_id,status)
+                SELECT cmd_id,$2,$3,$4 FROM eligible
+                ON CONFLICT(cmd_id) DO UPDATE SET timestamp=EXCLUDED.timestamp,status=EXCLUDED.status
+                WHERE robot_ack_state.robot_id=EXCLUDED.robot_id AND robot_ack_state.status='accepted'
+                  AND EXCLUDED.status IN ('done','failed') RETURNING cmd_id
+            ), history AS (
+                INSERT INTO robot_ack(cmd_id,timestamp,robot_id,status,message)
+                SELECT cmd_id,$2,$3,$4,$5 FROM transition
+            ) INSERT INTO command_ack_receipt(event_id,cmd_id,robot_id,status)
+              SELECT $6,cmd_id,$3,$4 FROM eligible ON CONFLICT(event_id) DO UPDATE SET event_id=
+                CASE WHEN command_ack_receipt.cmd_id=EXCLUDED.cmd_id
+                      AND command_ack_receipt.robot_id=EXCLUDED.robot_id
+                      AND command_ack_receipt.status=EXCLUDED.status
+                THEN command_ack_receipt.event_id ELSE NULL END`,
+				row.CmdID, row.Timestamp, row.RobotID, row.Status, row.Message, row.EventID, row.FleetID)
+			continue
+		}
 		batch.Queue(
 			`WITH transition AS (
                 INSERT INTO robot_ack_state (cmd_id, timestamp, robot_id, status)
