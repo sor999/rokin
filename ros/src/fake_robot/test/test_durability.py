@@ -5,6 +5,8 @@ import sys
 import tempfile
 import unittest
 import uuid
+import threading
+from unittest.mock import Mock, patch
 
 from fake_robot.durability import DeliveryJournal, CapacityError
 from fake_robot.commands import CommandAck, RobotCommands
@@ -83,6 +85,61 @@ class DeliveryJournalTest(unittest.TestCase):
         self.journal.recover('default', 'robot_1')
         self.journal.reported(old_receipts)
         self.assertTrue(self.journal.receipts()[0]['outcomeUnknown'])
+
+    def test_lock_wait_is_included_in_deadline_check(self):
+        cmd = self.command(action='stop')
+        cmd['expires_at'] = '1970-01-01T00:02:30+00:00'
+        entered, release = threading.Event(), threading.Event()
+        original_lock = self.journal.lock
+        results = []
+        class GatedLock:
+            def __enter__(self):
+                original_lock.acquire()
+                entered.set()
+                if not release.wait(2):
+                    original_lock.release()
+                    raise RuntimeError('Test gate timed out')
+            def __exit__(self, *args):
+                original_lock.release()
+        self.journal.lock = GatedLock()
+        worker = threading.Thread(target=lambda: results.append(self.journal.begin(cmd)))
+        try:
+            with patch('fake_robot.durability.time.time', return_value=100) as clock:
+                worker.start()
+                self.assertTrue(entered.wait(1))
+                clock.return_value = 200
+                release.set()
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
+            self.assertFalse(results[0][0])
+            self.assertEqual('failed', results[0][1]['status'])
+        finally:
+            release.set()
+            worker.join(2)
+            self.journal.lock = original_lock
+
+    def test_commit_delay_cannot_execute_an_expired_stop(self):
+        cmd = self.command(action='stop')
+        cmd['expires_at'] = '1970-01-01T00:02:30+00:00'
+        original_begin = self.journal.begin
+        apply = Mock(return_value=[CommandAck(cmd['cmd_id'], 'done', 'stopped')])
+        with patch('fake_robot.durability.time.time', return_value=100) as clock:
+            def slow_commit(command):
+                result = original_begin(command)
+                clock.return_value = 200
+                return result
+            with patch.object(self.journal, 'begin', side_effect=slow_commit):
+                result = self.journal.execute(cmd, apply)
+        apply.assert_not_called()
+        self.assertEqual('failed', result[0]['status'])
+        self.assertEqual(result, self.journal.acks())
+
+    def test_execute_replays_result_without_applying_a_second_time(self):
+        cmd = self.command(action='stop')
+        apply = Mock(return_value=[CommandAck(cmd['cmd_id'], 'done', 'stopped')])
+        first = self.journal.execute(cmd, apply)
+        self.assertEqual(first, self.journal.execute(cmd, apply))
+        apply.assert_called_once()
 
     def test_newer_move_finishes_interrupted_move(self):
         robot = RobotCommands(FakeRobotLogic())

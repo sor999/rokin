@@ -69,3 +69,7 @@ ROS 강제 종료 후 이동 재개 방지, Worker 및 DB 중단 후 Ack 복구 
 100.115초에 통과했다. 테스트는 각 시나리오의 로봇 준비 상태를 확인한 후 시작한다.
 로봇 단위 19개, Bridge 44개 중 3개 별도 통합 생략, 화면 단위 31개 및 typecheck/build 통과.
 STOMP 검증 실패는 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다. cmdId는 null이다. STORAGE_UNAVAILABLE에서 접수 여부 조회는 영속 경로가 활성화되고 처음부터 idempotencyKey를 보낸 요청에만 가능하다. 키 없는 요청은 cmdId를 받지 못하면 조회할 수 없으며 자동으로 다시 보내지 않는다. 복구가 필요한 클라이언트는 첫 전송부터 idempotencyKey를 포함해야 한다. 레거시 전달 실패는 DELIVERY_UNCERTAIN으로 표시하며 조회 가능 여부를 가정하지 않는다.
+
+병합 전 리뷰 보완: 로봇은 SQLite 잠금 대기 후 현재 시각으로 만료를 검사하고,
+실행 의도 커밋 후 동작 적용 직전에 다시 검사한다. 대기 중 만료된 정지가 실행되지 않는지와
+중복 명령이 동작 없이 같은 결과만 반환하는지 회귀 테스트로 검증한다.

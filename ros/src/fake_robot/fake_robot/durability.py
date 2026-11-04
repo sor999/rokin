@@ -129,7 +129,6 @@ class DeliveryJournal:
 
     def begin(self, command, now=None):
         """Commit execution intent before returning permission to change robot state."""
-        now = time.time() if now is None else now
         signature = hashlib.sha256(encoded(command).encode()).hexdigest()
         with self.lock, self.db:
             # BEGIN IMMEDIATE avoids two robot processes both passing the deduplication read.
@@ -149,7 +148,8 @@ class DeliveryJournal:
                 raise ValueError('Command expiry requires timezone')
             highest = self.db.execute('SELECT highest FROM sequence WHERE fleet=? AND robot=?',
                                       (command['fleet_id'], command['robot_id'])).fetchone()
-            reason = 'Command expired before execution' if expiry.timestamp() <= now else (
+            checked_at = time.time() if now is None else now
+            reason = 'Command expired before execution' if expiry.timestamp() <= checked_at else (
                 'Command superseded by a newer sequence' if highest and sequence <= highest[0] else None)
             self.db.execute('''INSERT INTO sequence VALUES (?,?,?) ON CONFLICT(fleet,robot)
                 DO UPDATE SET highest=MAX(highest,excluded.highest)''',
@@ -162,6 +162,16 @@ class DeliveryJournal:
                 self._record(ack)
                 return False, ack
             return True, None
+
+    def execute(self, command, apply):
+        """Recheck the deadline after the intent commit, immediately before applying the action."""
+        allowed, cached = self.begin(command)
+        if not allowed:
+            return [cached] if cached else []
+        if expiry_time(command['expires_at']).timestamp() <= time.time():
+            from .commands import CommandAck
+            return self.record([CommandAck(command['cmd_id'], 'failed', 'Command expired before execution')])
+        return self.record(apply())
 
     def _ack(self, cmd_id, status, message, data=None):
         row = self.db.execute('SELECT fleet,robot FROM execution WHERE cmd_id=?', (cmd_id,)).fetchone()
