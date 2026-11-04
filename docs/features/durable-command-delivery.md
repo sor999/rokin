@@ -32,4 +32,15 @@ PRESENCE_TEST_URL과 선택 PRESENCE_TEST_USER 및 PRESENCE_TEST_PASSWORD를 설
 Worker는 TEST_DATABASE_URL에서 TestDurableAckReceiptAtomicity를 실행한다.
 기본 H2 테스트만으로 PostgreSQL 임대와 경쟁 검증을 대체하지 않는다.
 
-STOMP 검증 실패는 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다. cmdId는 null이다. STORAGE_UNAVAILABLE에서 접수 여부 조회는 영속 경로가 활성화되고 처음부터 idempotencyKey를 보낸 요청에만 가능하다. 키 없는 요청은 cmdId를 받지 못하면 조회할 수 없으며 자동으로 다시 보내지 않는다. 복구가 필요한 클라이언트는 첫 전송부터 idempotencyKey를 포함해야 한다. 레거시 전달 실패는 DELIVERY_UNCERTAIN으로 표시하며 조회 가능 여부를 가정하지 않는다.
+handleCommand에 정상 역직렬화된 요청이 도달한 뒤 발생하는 검증 예외는
+같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다.
+cmdId는 null이다. 메시지 역직렬화 자체가 실패하면 컨트롤러에 도달하지 않으므로
+요청 식별자가 포함된 rejected 응답을 보장하지 않는다.
+
+STORAGE_UNAVAILABLE에서 접수 여부 조회는 영속 경로가 활성화되고 처음부터
+idempotencyKey를 보낸 요청에만 가능하다. 키 없는 요청은 cmdId를 받지 못하면 조회할 수 없으며
+자동으로 다시 보내지 않는다. 복구가 필요한 클라이언트는 첫 전송부터 idempotencyKey를 포함해야 한다.
+
+레거시 경로의 동기 전달 예외만 DELIVERY_UNCERTAIN으로 표시한다. 비동기 Kafka 발행 실패는
+accepted 응답 후 발생할 수 있으며 서버 로그에만 남고 클라이언트에 후속 실패 응답을 보내지 않는다.
+레거시 명령에는 outbox 키 조회를 통한 복구를 보장하지 않는다.
