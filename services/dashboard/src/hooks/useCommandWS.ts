@@ -40,6 +40,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
       if (saved.cmdId) recoveryRef.current.accepted({ requestId: saved.requestId, cmdId: saved.cmdId, robotId, status: "accepted" });
     }
     let recoveryCursor = 0;
+    const terminalKnown = new Set<string>();
     setIsConnected(false);
     setLastAck(null);
     setLastResult(null);
@@ -72,7 +73,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
             const ack = JSON.parse(msg.body) as AckDto;
             if (recoveryRef.current.apply(ack)) {
               setLastAck(ack);
-              if (ack.status === "done" || ack.status === "failed") durableRef.current?.completed(ack.cmdId);
+              if (ack.status === "done" || ack.status === "failed") terminalKnown.add(ack.cmdId);
             }
           } catch { /* 무시 */ }
         });
@@ -97,7 +98,13 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
         for (const entry of saved) {
           if (!active || current.signal.aborted) return;
           const status = await fetchCommandByKey(entry.idempotencyKey, AbortSignal.any([current.signal, AbortSignal.timeout(3000)]));
-          if (!active || !status || status.robotId !== robotId) continue;
+          if (!active) return;
+          if (!status) {
+            // Legacy commands have no outbox entry; retain their key until a real terminal Ack.
+            if (entry.cmdId && terminalKnown.has(entry.cmdId)) durableRef.current?.finish(entry.requestId);
+            continue;
+          }
+          if (status.robotId !== robotId) continue;
           const result: CommandResult = { requestId: entry.requestId, cmdId: status.cmdId, robotId,
             status: "accepted", deliveryStatus: status.deliveryStatus };
           recoveryRef.current.accepted(result);
@@ -111,7 +118,7 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
           (id, signal) => fetchCommandAck(robotId, id, signal),
           (ack) => { if (active) {
             setLastAck(ack);
-            if (ack.status === "done" || ack.status === "failed") durableRef.current?.completed(ack.cmdId);
+            if (ack.status === "done" || ack.status === "failed") terminalKnown.add(ack.cmdId);
           } }, current.signal);
       } catch { /* DB 적재 지연과 일시 장애는 다음 조회에서 재시도한다. */ }
       finally { if (request === current) request = null; }

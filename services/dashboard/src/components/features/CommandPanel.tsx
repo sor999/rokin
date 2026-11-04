@@ -205,7 +205,9 @@ export function CommandPanel({
 
         {lastResult?.deliveryStatus && (
           <p role="status" className="text-xs text-muted-foreground">
-            {{ PENDING: "명령 접수됨, 전달 대기 중", RECEIVED: "로봇 수신 확인됨", EXPIRED: "실행 시작 전 만료됨",
+            {lastAck?.cmdId === lastResult.cmdId && (lastAck.status === "done" || lastAck.status === "failed") && lastResult.deliveryStatus !== "COMPLETED"
+              ? "로봇 완료 응답 수신, 저장 확인 중"
+              : { PENDING: "명령 접수됨, 전달 대기 중", RECEIVED: "로봇 수신 확인됨", EXPIRED: "실행 시작 전 만료됨",
               OUTCOME_UNKNOWN: "결과 확인 불가, 이전 이동은 자동 재전송하지 않습니다", COMPLETED: "로봇 결과 저장 확인됨" }[lastResult.deliveryStatus]}
           </p>
         )}
