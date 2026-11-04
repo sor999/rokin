@@ -28,7 +28,7 @@
 
 ## 검증
 
-PRESENCE_TEST_URL을 설정해 DurableCommandPostgresTest를 실행한다.
+PRESENCE_TEST_URL과 선택 PRESENCE_TEST_USER 및 PRESENCE_TEST_PASSWORD를 설정해 DurableCommandPostgresTest를 실행한다.
 Worker는 TEST_DATABASE_URL에서 TestDurableAckReceiptAtomicity를 실행한다.
 기본 H2 테스트만으로 PostgreSQL 임대와 경쟁 검증을 대체하지 않는다.
 
@@ -68,3 +68,4 @@ RUN_COMMAND_DURABILITY=1 python3 -m unittest discover -s scripts/scalability -p 
 ROS 강제 종료 후 이동 재개 방지, Worker 및 DB 중단 후 Ack 복구 3개 시나리오가
 100.115초에 통과했다. 테스트는 각 시나리오의 로봇 준비 상태를 확인한 후 시작한다.
 로봇 단위 19개, Bridge 44개 중 3개 별도 통합 생략, 화면 단위 31개 및 typecheck/build 통과.
+STOMP 검증 실패는 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다. cmdId는 null이다. STORAGE_UNAVAILABLE은 접수 여부가 불명확할 수 있으므로 요청 키 조회를 유지한다.

@@ -27,7 +27,15 @@ public class CommandController {
                 request.getCommand(),
                 request.getData()
         );
-        String cmdId = commandService.sendCommand(request);
-        return CommandAcceptedResponseDto.of(cmdId, request.getRobotId(), request.getRequestId());
+        try {
+            String cmdId = commandService.sendCommand(request);
+            return CommandAcceptedResponseDto.of(cmdId, request.getRobotId(), request.getRequestId());
+        } catch (IllegalArgumentException e) {
+            return CommandAcceptedResponseDto.rejected(request,"INVALID_REQUEST","명령 입력을 확인해주세요.");
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return CommandAcceptedResponseDto.rejected(request,e.getStatusCode().value()==409 ? "IDEMPOTENCY_CONFLICT" : "COMMAND_UNAVAILABLE",e.getReason());
+        } catch (org.springframework.dao.DataAccessException | org.springframework.transaction.TransactionException e) {
+            return CommandAcceptedResponseDto.rejected(request,"STORAGE_UNAVAILABLE","명령 접수 여부를 조회로 확인해주세요.");
+        }
     }
 }

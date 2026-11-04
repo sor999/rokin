@@ -23,6 +23,13 @@ class CommandControllerTest {
     @InjectMocks
     private CommandController controller;
 
+    @Test void invalidCommandReturnsCorrelatedRejection() {
+        var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setRequestId("invalid-key");
+        given(commandService.sendCommand(request)).willThrow(new IllegalArgumentException("invalid UUID"));
+        var response=controller.handleCommand(request);
+        assertThat(response.requestId()).isEqualTo("invalid-key");assertThat(response.status()).isEqualTo("rejected");
+        assertThat(response.cmdId()).isNull();assertThat(response.errorCode()).isEqualTo("INVALID_REQUEST");
+    }
     @Test
     @DisplayName("정지 접수 응답에 요청 식별자를 포함하며 로봇 완료로 표시하지 않는다")
     void handleCommand_ReturnsStopRequestId() {
