@@ -78,7 +78,7 @@ scripts/durability/kafka-lab.sh stop
 ```
 
 별도 rokin-durable-lab 프로젝트와 Kafka 볼륨 3개를 사용한다. 호스트 포트는
-127.0.0.1의 29192, 29292, 29392이며 Kafka exporter는 29408이다.
+127.0.0.1의 29192, 29292, 29392이며 Kafka exporter는 29408, 복제 지표와 경보를 수집하는 Prometheus는 29490이다.
 Kafka 자체 KRaft quorum으로 메타데이터도 각 영속 볼륨에 보존한다.
 기존 개발용 단일 브로커를 3대 구성으로 자동 전환하지 않는다.
 
@@ -108,3 +108,17 @@ min.insync.replicas=2 및 unclean.leader.election.enable=false를 설정하고 �
 API의 journal 지표는 마지막 정상 HTTP 보고값이다. ROS 프로세스 자체 종료는 타깃 및
 기존 runtime heartbeat와 함께 확인한다. 지표가 조용하다고 전달 완료로 해석하지 않는다.
 STOMP 검증 실패는 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다. cmdId는 null이다. STORAGE_UNAVAILABLE은 접수 여부가 불명확할 수 있으므로 요청 키 조회를 유지한다.
+
+전환 시 Worker 전용 DB 역할을 사용하는 환경은 command_outbox의 SELECT와
+command_ack_receipt의 SELECT, INSERT, UPDATE 권한을 추가해야 한다. 이력과 Ack 상태 전이의
+기존 권한도 유지한다. Compose의 개발 계정 외 운영 역할에 권한을 자동 부여하지 않는다.
+
+## 최종 회귀 기록
+
+리뷰 반영 후 실제 통합 5개가 111.687초에 통과했다. API 재시작, 잘못된 요청 키의
+오류 응답, 접수 응답 유실, ROS 강제 종료, Worker와 DB 중단 및 복구를 포함한다.
+로봇 단위 21개, Bridge 44개 중 별도 환경 3개 생략, 화면 단위 32개와 typecheck/build 통과.
+기본 경로의 Kafka 타임아웃은 유지하고 outbox 전용 producer만 짧은 제한을 사용한다.
+발행은 API당 10개 상한과 1초 임대로 제한하며, 앞선 지연 전송이 정지 전송을 막지 않는지
+및 정지 5초 만료 전에 임대를 다시 맡을 수 있는지 검증했다.
+API도 ROS와 같은 16KiB 입력 상한을 적용해 전달 불가능한 명령의 접수를 차단한다.

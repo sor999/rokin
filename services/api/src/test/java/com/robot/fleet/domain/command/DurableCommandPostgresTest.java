@@ -99,6 +99,12 @@ class DurableCommandPostgresTest {
         assertThat(repo.claim("default",UUID.randomUUID())).extracting(CommandOutboxRepository.Entry::cmdId).containsExactly(id);
         assertThat(repo.now()).isBefore(repo.byId("default",id).orElseThrow().expiresAt());
     }
+    @Test void oversizedPayloadCannotCreateAnUndeliverableCommand() {
+        var request=request(UUID.randomUUID().toString()); request.setIssuedBy("x".repeat(16384));
+        assertThatThrownBy(()->service.accept(request)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_sequence",Integer.class)).isZero();
+    }
     @Test void expiryDoesNotFabricateRobotAck() {
         UUID id=UUID.fromString(service.accept(request(UUID.randomUUID().toString())));
         jdbc.update("UPDATE command_outbox SET expires_at=clock_timestamp()-interval '1 second'");

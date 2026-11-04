@@ -101,6 +101,15 @@ services:
     command: [--kafka.server=kafka1:29092, --kafka.server=kafka2:29092, --kafka.server=kafka3:29092]
     ports: ['127.0.0.1:29408:9308']
     restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus]
+    ports: ['127.0.0.1:29490:9090']
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
   topic-init:
     image: confluentinc/cp-kafka:7.4.3
     depends_on:
@@ -114,6 +123,7 @@ services:
     volumes: [../kafka/topic-init.sh:/usr/local/bin/topic-init.sh:ro]
     entrypoint: [bash, /usr/local/bin/topic-init.sh]
 volumes:
+  prometheus_data:
   kafka1_data:
   kafka2_data:
   kafka3_data:
