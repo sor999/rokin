@@ -136,3 +136,5 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - ROS: test_durability.py와 test_durable_delivery.py로 디스크 복구 및 최종 확인 전 보존 검증
 - Dashboard: durableRequests 테스트로 요청 키 복원, 저장 실패와 추적 상한 검증
 - 실제 강제 종료와 저장소 중단은 [영속 전달 문서](../features/durable-command-delivery.md)의 opt-in 시나리오에서 실행
+- Kafka 3대 복제: scripts/durability/kafka-lab.sh up 및 test, 종료는 stop 사용
+- 이 검증은 고유 테스트 토픽의 레코드를 제거해 원본 유실을 재현하며 기존 애플리케이션 토픽과 볼륨은 삭제하지 않음

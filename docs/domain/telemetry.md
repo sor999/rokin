@@ -81,3 +81,10 @@ API가 SSE/REST의 `runtimeId`로 전달한다. 현재 등록 인스턴스와 �
 SSE의 offline timestamp는 만료 조회에서 얻은 원본 관측 시각이다. 화면은 더 최신 관측이
 있으면 이 offline을 무시하고, 같은 관측의 만료는 적용한다. 지연 pose와 같은 시각의
 재전달은 위치와 궤적을 되돌리지 않는다. 상세 계약은 [ADR 0006](../decisions/0006-shared-presence.md)을 따른다.
+
+## 선택적 영속 명령 경로
+
+COMMAND_DURABLE_ENABLED에서 cmd_id에 더해 expires_at과 로봇별 command_sequence를 전달한다.
+로봇은 영속 실행 의도와 결과로 재시작 후에도 중복을 억제한다. 새 Ack의 event_id와 fleet_id는
+Worker의 최종 수신 확인에 사용한다. 기존 Ack 상태 집합은 바꾸지 않으며 OUTCOME_UNKNOWN은
+명령 조회의 별도 전달 상태다. 상세 범위는 [ADR 0008](../decisions/0008-durable-command-delivery.md)을 따른다.

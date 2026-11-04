@@ -68,3 +68,42 @@ RUN_COMMAND_DURABILITY=1 python3 -m unittest discover -s scripts/scalability -p 
 ROS 강제 종료 후 이동 재개 방지, Worker 및 DB 중단 후 Ack 복구 3개 시나리오가
 100.115초에 통과했다. 테스트는 각 시나리오의 로봇 준비 상태를 확인한 후 시작한다.
 로봇 단위 19개, Bridge 44개 중 3개 별도 통합 생략, 화면 단위 31개 및 typecheck/build 통과.
+
+## Kafka 3대 검증 구성
+
+```bash
+scripts/durability/kafka-lab.sh up
+scripts/durability/kafka-lab.sh test
+scripts/durability/kafka-lab.sh stop
+```
+
+별도 rokin-durable-lab 프로젝트와 Kafka 볼륨 3개를 사용한다. 호스트 포트는
+127.0.0.1의 29192, 29292, 29392이며 Kafka exporter는 29408이다.
+Kafka 자체 KRaft quorum으로 메타데이터도 각 영속 볼륨에 보존한다.
+기존 개발용 단일 브로커를 3대 구성으로 자동 전환하지 않는다.
+
+토픽 초기화 환경: KAFKA_REPLICATION_FACTOR=3, KAFKA_MIN_INSYNC_REPLICAS=2.
+기존 RF가 다르면 중단한다. 운영 토픽은 신규 브로커를 추가하고 kafka-reassign-partitions로
+명시적 replica 목록을 확장한 뒤 --verify로 완료를 확인한다. 이어서 kafka-configs --alter로
+min.insync.replicas=2 및 unclean.leader.election.enable=false를 설정하고 검증한다.
+재배치 완료 전 ISR을 강제로 낮추거나 토픽을 삭제 및 재생성하지 않는다.
+
+검증은 고유 durability-test 접두사의 새 토픽만 사용한다. 리더 1대 중단 후 발행 성공,
+2대 중단 후 발행 실패 및 로컬 Ack 유지, 복구 후 같은 event_id 재전송을 검사한다.
+원본 유실 시나리오는 해당 전용 테스트 토픽의 레코드만 제거하고 로컬 사본으로 복구한다.
+브로커 전송 확인 후에도 로컬 사본이 남는 것을 단언한다. 최종 Worker DB 저장 확인은
+별도의 실제 API/Worker/ROS 통합 테스트와 PostgreSQL 테스트에서 검증한다.
+테스트 토픽과 볼륨을 자동 삭제하지 않는다.
+
+검증 기록: Kafka 3대의 원본 레코드 제거 및 재전송, 리더 장애와 quorum 손실 및 복구
+2개 시나리오가 46.432초에 통과했다. 운영 서버 배포나 장애 영역 분산은 수행하지 않았다.
+
+## 운영 관측
+
+- API: command_delivery{state}, command_oldest_pending_seconds, command_publish_total
+- ROS 보고: command_journal{kind}의 unconfirmedAcks, oldestAckAgeSeconds, diskBytes,
+  storageFailures와 retransmissions
+- Kafka exporter: ISR과 replica 수 비교, producer의 발행 실패
+
+API의 journal 지표는 마지막 정상 HTTP 보고값이다. ROS 프로세스 자체 종료는 타깃 및
+기존 runtime heartbeat와 함께 확인한다. 지표가 조용하다고 전달 완료로 해석하지 않는다.

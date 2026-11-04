@@ -35,3 +35,38 @@ groups:
         annotations:
           summary: "Spring API is returning server errors"
           description: "The API has continuously returned HTTP 5xx responses for two minutes."
+
+      - alert: DurableCommandOutcomeUnknown
+        expr: command_delivery{state="unknown"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Command outcomes require reconciliation"
+          description: "At least one command has an uncertain execution outcome. Do not resend movement automatically."
+
+      - alert: DurableAckRecoveryDelayed
+        expr: command_journal{kind="oldestAckAgeSeconds"} > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Robot Acks are awaiting durable database confirmation"
+          description: "Inspect Worker, Kafka and database availability before changing journal data."
+
+      - alert: DurableJournalStorageFailure
+        expr: delta(command_journal{kind="storageFailures"}[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Robot durable storage failed"
+          description: "New commands are blocked; preserve the volume and inspect available disk space."
+
+      - alert: KafkaReplicationDegraded
+        expr: kafka_topic_partition_in_sync_replica < kafka_topic_partition_replicas
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka replicas are out of sync"
+          description: "Restore replicas before reducing minimum ISR or changing producer acknowledgement settings."

@@ -83,6 +83,13 @@ class DurableCommandPostgresTest {
         repo.received("default",id,"robot_1",false); repo.release(id,current);
         assertThat(repo.claim("default",UUID.randomUUID())).isEmpty();
     }
+    @Test void storageFailureRollsBackAllocatedSequenceAndAcceptance() {
+        jdbc.execute("CREATE FUNCTION reject_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test storage failure'; END $$");
+        jdbc.execute("CREATE TRIGGER fail_outbox BEFORE INSERT ON command_outbox FOR EACH ROW EXECUTE FUNCTION reject_outbox()");
+        assertThatThrownBy(()->service.accept(request(UUID.randomUUID().toString()))).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_sequence",Integer.class)).isZero();
+    }
     @Test void expiryDoesNotFabricateRobotAck() {
         UUID id=UUID.fromString(service.accept(request(UUID.randomUUID().toString())));
         jdbc.update("UPDATE command_outbox SET expires_at=clock_timestamp()-interval '1 second'");

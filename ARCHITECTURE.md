@@ -89,3 +89,11 @@ Worker의 이력 INSERT와 같은 DB 트랜잭션에서 최신 상태 투영을 
 공유 온라인 상태를 한 번에 읽으며, 등록과 runtime 변경은 Fleet별로 조정한다.
 소유권 확인은 DB 기준을 유지하고 TTL 캐시를 추가하지 않는다. 갱신 순서와 배포 전환은
 [ADR 0007](docs/decisions/0007-fleet-database-scalability.md)을 따른다.
+
+## 명령과 Ack 영속 전달
+
+선택적으로 API의 PostgreSQL outbox와 ROS의 SQLite WAL/FULL 저널을 연결한다.
+명령은 실행 전에 기록하고 Ack는 Worker DB 확인 전까지 재전송 사본을 보존한다.
+전송과 실행 결과, 만료 및 결과 불확실 상태를 구분하며 기본 설정은 비활성화다.
+[ADR 0008](docs/decisions/0008-durable-command-delivery.md)과
+[전환 및 검증](docs/features/durable-command-delivery.md)에 범위와 복구 계약을 기록한다.

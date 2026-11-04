@@ -1,0 +1,119 @@
+# Isolated single-host verification cluster; production requires separate failure domains.
+services:
+  kafka1:
+    image: confluentinc/cp-kafka:7.4.3
+    hostname: kafka1
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:29092,HOST://localhost:29192
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: 'false'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_REPLICA_LAG_TIME_MAX_MS: 5000
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    ports: ['127.0.0.1:29192:9092']
+    volumes: [kafka1_data:/var/lib/kafka/data]
+    mem_limit: 1g
+    healthcheck:
+      test: [CMD-SHELL, 'kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  kafka2:
+    image: confluentinc/cp-kafka:7.4.3
+    hostname: kafka2
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:29092,HOST://localhost:29292
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: 'false'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_REPLICA_LAG_TIME_MAX_MS: 5000
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    ports: ['127.0.0.1:29292:9092']
+    volumes: [kafka2_data:/var/lib/kafka/data]
+    mem_limit: 1g
+    healthcheck:
+      test: [CMD-SHELL, 'kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  kafka3:
+    image: confluentinc/cp-kafka:7.4.3
+    hostname: kafka3
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:29092,HOST://localhost:29392
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: 'false'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_REPLICA_LAG_TIME_MAX_MS: 5000
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    ports: ['127.0.0.1:29392:9092']
+    volumes: [kafka3_data:/var/lib/kafka/data]
+    mem_limit: 1g
+    healthcheck:
+      test: [CMD-SHELL, 'kafka-broker-api-versions --bootstrap-server localhost:29092 >/dev/null 2>&1']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    command: [--kafka.server=kafka1:29092, --kafka.server=kafka2:29092, --kafka.server=kafka3:29092]
+    ports: ['127.0.0.1:29408:9308']
+    restart: unless-stopped
+  topic-init:
+    image: confluentinc/cp-kafka:7.4.3
+    depends_on:
+      kafka1: {condition: service_healthy}
+      kafka2: {condition: service_healthy}
+      kafka3: {condition: service_healthy}
+    environment:
+      KAFKA_BROKER_URL: kafka1:29092,kafka2:29092,kafka3:29092
+      KAFKA_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+    volumes: [../kafka/topic-init.sh:/usr/local/bin/topic-init.sh:ro]
+    entrypoint: [bash, /usr/local/bin/topic-init.sh]
+volumes:
+  kafka1_data:
+  kafka2_data:
+  kafka3_data:

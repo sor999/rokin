@@ -84,6 +84,14 @@ class DeliveryJournalTest(unittest.TestCase):
         self.journal.reported(old_receipts)
         self.assertTrue(self.journal.receipts()[0]['outcomeUnknown'])
 
+    def test_unknown_execution_remains_counted_after_receipt_reporting(self):
+        cmd = self.command()
+        self.journal.enqueue(cmd); self.journal.begin(cmd)
+        self.journal.recover('default', 'robot_1')
+        self.journal.reported(self.journal.receipts())
+        self.journal.maximum = 1
+        with self.assertRaises(CapacityError): self.journal.enqueue(self.command(seq=2))
+
     def test_newer_move_finishes_interrupted_move(self):
         robot = RobotCommands(FakeRobotLogic())
         first, second = self.command(), self.command(seq=2)
