@@ -100,3 +100,11 @@ test('만료된 Ack 이력도 상한을 지키고 최근 이력만 지연 수신
   assert.equal(state.apply(ack('c4', 'done')), true);
   assert.equal(state.canSend(), true);
 });
+
+test('거부 응답은 접수로 취급하지 않으며 명확한 거부 후 추적 슬롯을 회수한다', () => {
+  const state = tracker(); state.sent('invalid');
+  assert.equal(state.accepted({requestId:'invalid',cmdId:null,status:'rejected'}),false);
+  state.rejected('invalid');
+  assert.deepEqual(state.pending(),[]);
+  assert.equal(state.accepted(result('invalid','foreign')),false);
+});

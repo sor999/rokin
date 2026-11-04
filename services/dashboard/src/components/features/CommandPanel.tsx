@@ -70,6 +70,11 @@ export function CommandPanel({
   useEffect(() => {
     if (!lastResult || lastResult.robotId !== robotId || !activeRequestId) return;
     if (lastResult.requestId !== activeRequestId) return;
+    if (lastResult.status === "rejected") {
+      setCmdState("failed");
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+      return;
+    }
     setActiveCmdId(lastResult.cmdId);
   }, [lastResult, robotId, activeRequestId]);
 
@@ -203,7 +208,10 @@ export function CommandPanel({
           </Button>
         </div>
 
-        {lastResult?.deliveryStatus && (
+        {lastResult?.status === "rejected" && lastResult.requestId === activeRequestId && (
+          <p role="alert" className="text-xs text-destructive">{lastResult.message ?? "명령 요청을 처리하지 못했습니다."}</p>
+        )}
+        {lastResult?.deliveryStatus && (!activeRequestId || lastResult.requestId === activeRequestId) && (
           <p role="status" className="text-xs text-muted-foreground">
             {lastAck?.cmdId === lastResult.cmdId && (lastAck.status === "done" || lastAck.status === "failed") && lastResult.deliveryStatus !== "COMPLETED"
               ? "로봇 완료 응답 수신, 저장 확인 중"

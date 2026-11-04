@@ -59,7 +59,18 @@ export function useCommandWS(robotId: string): UseCommandWSReturn {
           if (!active) return;
           try {
             const res = JSON.parse(msg.body) as CommandResult;
-            if (res.robotId === robotId && recoveryRef.current.accepted(res)) {
+            if (res.robotId !== robotId) return;
+            if (res.status === "rejected") {
+              if (!res.requestId || !durableRef.current?.all().some(entry => entry.requestId === res.requestId)) return;
+              setLastResult(res);
+              if (res.errorCode !== "STORAGE_UNAVAILABLE") {
+                durableRef.current.finish(res.requestId);
+                recoveryRef.current.rejected(res.requestId);
+              }
+              return;
+            }
+            if (!res.cmdId) return;
+            if (recoveryRef.current.accepted(res)) {
               if (res.requestId) durableRef.current?.accepted(res.requestId, res.cmdId);
               setLastResult(res);
             }
