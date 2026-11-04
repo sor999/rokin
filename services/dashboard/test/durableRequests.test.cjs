@@ -19,3 +19,15 @@ test('브라우저 저장 실패와 100개 한도에서 전송을 허용하지 �
  const state=new DurableRequests(storage(),'robot');for(let i=0;i<100;i++)assert.equal(state.add('r'+i,'k'+i),true);
  assert.equal(state.add('overflow','key'),false);
 });
+
+test('저장과 전달이 불확실한 거부는 재전송 없이 요청 키를 보존한다',()=>{
+ const disk=storage(),state=new DurableRequests(disk,'robot');
+ for(const code of ['STORAGE_UNAVAILABLE','DELIVERY_UNCERTAIN']) {
+   state.add(code,'key-'+code);
+   assert.equal(state.rejected(code,code),false);
+ }
+ assert.equal(new DurableRequests(disk,'robot').all().length,2);
+ state.add('invalid','key-invalid');
+ assert.equal(state.rejected('invalid','INVALID_REQUEST'),true);
+ assert.deepEqual(state.all().map(r=>r.requestId),['STORAGE_UNAVAILABLE','DELIVERY_UNCERTAIN']);
+});

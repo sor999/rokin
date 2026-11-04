@@ -28,6 +28,11 @@ export class DurableRequests {
     for (const [id, entry] of this.entries) if (entry.cmdId === cmdId) this.entries.delete(id);
     this.save();
   }
+  rejected(requestId: string, errorCode?: string | null): boolean {
+    if (errorCode === "STORAGE_UNAVAILABLE" || errorCode === "DELIVERY_UNCERTAIN") return false;
+    this.finish(requestId);
+    return true;
+  }
   finish(requestId: string) { this.entries.delete(requestId); this.save(); }
   private save() { this.storage.setItem(this.key, JSON.stringify(this.all())); }
 }
