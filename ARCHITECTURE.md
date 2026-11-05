@@ -97,3 +97,10 @@ Worker의 이력 INSERT와 같은 DB 트랜잭션에서 최신 상태 투영을 
 전송과 실행 결과, 만료 및 결과 불확실 상태를 구분하며 기본 설정은 비활성화다.
 [ADR 0008](docs/decisions/0008-durable-command-delivery.md)과
 [전환 및 검증](docs/features/durable-command-delivery.md)에 범위와 복구 계약을 기록한다.
+
+## Worker의 제한된 소비와 파티션 소유권
+
+Worker는 같은 group에서 텔레메트리와 Ack를 서로 다른 Consumer 및 DB 풀로 처리한다.
+파티션별 고정 배치와 예약 예산으로 DB 장애 시 소비를 중지하고, 할당 세대로 이전
+작업의 커밋을 차단한다. [ADR 0009](docs/decisions/0009-worker-backpressure.md)와
+[부하 및 장애 검증](docs/features/worker-backpressure.md)에 상한과 재처리 계약을 기록한다.

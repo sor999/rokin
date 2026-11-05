@@ -1,0 +1,95 @@
+name: rokin-worker-lab
+services:
+  postgres:
+    image: rokin-worker-lab-postgres
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: worker_lab_only
+      POSTGRES_DB: telemetry
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ../../services/api/src/main/resources/db/migration:/migrations:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d telemetry]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.3
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    volumes:
+      - zk-data:/var/lib/zookeeper/data
+      - zk-log:/var/lib/zookeeper/log
+  kafka:
+    image: confluentinc/cp-kafka:7.4.3
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka:/var/lib/kafka/data
+    healthcheck:
+      test: [CMD, kafka-topics, --bootstrap-server, kafka:9092, --list]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+  topic-init:
+    image: confluentinc/cp-kafka:7.4.3
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ../kafka/topic-init.sh:/topic-init.sh:ro
+    environment:
+      KAFKA_BROKER_URL: kafka:9092
+    entrypoint: [bash, /topic-init.sh]
+  worker:
+    image: rokin-worker-lab-worker
+    build:
+      context: ../../services/worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: worker_lab_only
+      POSTGRES_DB: telemetry
+      KAFKA_BROKER_URL: kafka:9092
+      KAFKA_GROUP_ID: telemetry-worker
+      GOMEMLIMIT: 320MiB
+      COMMAND_DURABLE_ENABLED: 'false'
+    mem_limit: 512m
+    stop_grace_period: 30s
+    ports: ['127.0.0.1::2112']
+  load:
+    image: rokin-worker-lab-load
+    build:
+      context: ../../scripts/worker-lab
+    profiles: [tools]
+    volumes:
+      - ../../scripts/worker-lab:/scripts:ro
+    entrypoint: [python3, /scripts/produce.py]
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [observability]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports: ['127.0.0.1:29445:9090']
+volumes:
+  postgres:
+  kafka:
+  zk-data:
+  zk-log:

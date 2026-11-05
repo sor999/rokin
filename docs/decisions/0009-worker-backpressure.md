@@ -1,6 +1,6 @@
 # ADR 0009: Worker의 제한된 대기열과 파티션 소유권
 
-- 상태: 구현 및 검증 중
+- 상태: 채택, 격리 환경 검증 완료
 - 관련: [확장성 계획](../features/distributed-scalability-plan.md), [Ack 저장](0002-ack-persistence.md)
 
 ## 결정

@@ -138,3 +138,12 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - 실제 강제 종료와 저장소 중단은 [영속 전달 문서](../features/durable-command-delivery.md)의 opt-in 시나리오에서 실행
 - Kafka 3대 복제: scripts/durability/kafka-lab.sh up 및 test, 종료는 stop 사용
 - 이 검증은 고유 테스트 토픽의 레코드를 제거해 원본 유실을 재현하며 기존 애플리케이션 토픽과 볼륨은 삭제하지 않음
+
+## Worker 부하 제어 검증
+
+- Worker: go test ./..., go test -race ./..., go vet ./...와 go build ./cmd/worker
+- KAFKA_TEST_BROKER가 있으면 고유 토픽과 새 group으로 보존 중인 첫 위치부터 소비하는지 확인
+- TEST_DATABASE_URL로 기존 PostgreSQL 멱등성 및 Ack 상태와 수신 확인 원자성 테스트 실행
+- 실제 10분 DB 중단, Ack 격리, RSS와 lag 및 Worker 증설과 축소는
+  [Worker 실행 문서](../features/worker-backpressure.md)의 격리 환경에서 별도 수행
+- 검증 도구는 별도 프로젝트를 사용하며 기존 볼륨과 커밋 위치를 초기화하지 않음

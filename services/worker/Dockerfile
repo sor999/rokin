@@ -4,10 +4,11 @@ RUN apt-get update && apt-get install -y librdkafka-dev && rm -rf /var/lib/apt/l
 
 WORKDIR /app
 
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
 
-RUN go mod tidy && CGO_ENABLED=1 go build -o worker ./cmd/worker
+RUN CGO_ENABLED=1 go build -o worker ./cmd/worker
 
 FROM debian:bookworm-slim
 
