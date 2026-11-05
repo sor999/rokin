@@ -260,3 +260,51 @@ func TestRetainedOffsetNeverResetsExistingGroup(t *testing.T) {
 		}
 	}
 }
+
+func TestRetrySuccessReleasesOnlyFrozenBatch(t *testing.T) {
+	attempts := 0
+	e, d, p := setup(t, func(context.Context, []Message) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("offline")
+		}
+		return nil
+	})
+	e.admit(message(p, 1))
+	e.admit(message(p, 4))
+	e.schedule(time.Now(), true)
+	finish(t, e)
+	e.admit(message(p, 7))
+	e.states[p].batch.retryAt = time.Time{}
+	e.schedule(time.Now(), true)
+	finish(t, e)
+	e.commits()
+	if e.count != 1 || e.states[p].count != 1 || len(d.commits) != 1 || d.commits[0] != 5 {
+		t.Fatalf("count=%d commits=%v", e.count, d.commits)
+	}
+	e.schedule(time.Now(), true)
+	finish(t, e)
+	e.commits()
+	if e.count != 0 || e.bytes != 0 || d.commits[1] != 8 {
+		t.Fatal("recovery did not release reservations")
+	}
+}
+
+func TestGlobalPressurePausesOtherPartitions(t *testing.T) {
+	e, d, p := setup(t, func(context.Context, []Message) error { return nil })
+	q := Partition{p.Topic, 1}
+	e.assign([]Partition{p, q})
+	for i := 0; i < 4; i++ {
+		e.admit(message(p, int64(i)))
+	}
+	e.controls(false)
+	if !d.paused[p] || !d.paused[q] {
+		t.Fatal("global pressure did not pause whole lane")
+	}
+	e.schedule(time.Now(), true)
+	finish(t, e)
+	e.controls(false)
+	if d.paused[p] || d.paused[q] {
+		t.Fatal("half usage did not resume lane")
+	}
+}

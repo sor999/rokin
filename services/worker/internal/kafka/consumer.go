@@ -35,7 +35,8 @@ func NewConsumer(broker, groupID string, topics []string, dlqTopic string, metri
 		"go.application.rebalance.enable": true, "partition.assignment.strategy": "range",
 		"queued.max.messages.kbytes": limits.NativeQueueKiB,
 		"fetch.message.max.bytes":    limits.MessageBytes, "fetch.max.bytes": limits.NativeQueueKiB * 1024,
-		"socket.timeout.ms": 3000, "session.timeout.ms": 10000,
+		"receive.message.max.bytes": limits.NativeQueueKiB*1024 + 512,
+		"socket.timeout.ms":         3000, "session.timeout.ms": 10000,
 	})
 	if err != nil {
 		return nil, err

@@ -98,7 +98,7 @@ func main() {
 			pool.Close()
 			log.Fatal(err)
 		}
-		h := handler.New(repository.New(pool), consumer)
+		h := handler.New(repository.New(pool), consumer, lane.limits.OperationTimeout)
 		engine := kafkapkg.NewEngine(consumer, lane.limits, h.Process, kafkapkg.MetricsAdapter{Metrics: metrics}, lane.name)
 		wg.Add(1)
 		go func() {

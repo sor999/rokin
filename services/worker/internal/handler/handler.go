@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
+	"unicode/utf8"
 
 	kafkapkg "github.com/sor999/robot/services/worker/internal/kafka"
 	"github.com/sor999/robot/services/worker/internal/repository"
@@ -42,11 +44,18 @@ type DeadLetter interface {
 
 // Handler는 한 파티션의 배치를 저장한다. 실패한 배치는 호출자가 그대로 재시도한다.
 type Handler struct {
-	repo Store
-	dlq  DeadLetter
+	repo    Store
+	dlq     DeadLetter
+	timeout time.Duration
 }
 
-func New(repo Store, dlq DeadLetter) *Handler { return &Handler{repo: repo, dlq: dlq} }
+func New(repo Store, dlq DeadLetter, operationTimeout ...time.Duration) *Handler {
+	timeout := 5 * time.Second
+	if len(operationTimeout) > 0 {
+		timeout = operationTimeout[0]
+	}
+	return &Handler{repo: repo, dlq: dlq, timeout: timeout}
+}
 
 func (h *Handler) Process(ctx context.Context, msgs []kafkapkg.Message) error {
 	if len(msgs) == 0 {
@@ -87,20 +96,25 @@ func (h *Handler) Process(ctx context.Context, msgs []kafkapkg.Message) error {
 			return fmt.Errorf("unknown topic: %s", msg.Topic)
 		}
 		if err != nil {
-			if err = h.dlq.SendToDLQ(ctx, msg.Topic, msg.Payload, err.Error()); err != nil {
+			operation, cancel := context.WithTimeout(ctx, h.timeout)
+			err = h.dlq.SendToDLQ(operation, msg.Topic, msg.Payload, err.Error())
+			cancel()
+			if err != nil {
 				return err
 			}
 		}
 	}
+	operation, cancel := context.WithTimeout(ctx, h.timeout)
+	defer cancel()
 	switch msgs[0].Topic {
 	case "telemetry.pose":
-		return h.repo.BatchInsertPose(ctx, poses)
+		return h.repo.BatchInsertPose(operation, poses)
 	case "telemetry.battery":
-		return h.repo.BatchInsertBattery(ctx, batteries)
+		return h.repo.BatchInsertBattery(operation, batteries)
 	case "telemetry.status":
-		return h.repo.BatchInsertStatus(ctx, statuses)
+		return h.repo.BatchInsertStatus(operation, statuses)
 	case "ack.robot":
-		return h.repo.BatchInsertAck(ctx, acks)
+		return h.repo.BatchInsertAck(operation, acks)
 	}
 	return nil
 }
@@ -109,6 +123,9 @@ func parsePose(payload []byte) (repository.PoseRow, error) {
 	var env telemetryEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
 		return repository.PoseRow{}, fmt.Errorf("envelope 파싱 실패: %w", err)
+	}
+	if !validUUID(env.EventID) || env.RobotID == "" || utf8.RuneCountInString(env.RobotID) > 64 || utf8.RuneCountInString(env.RuntimeID) > 36 {
+		return repository.PoseRow{}, fmt.Errorf("invalid telemetry identity")
 	}
 	var data struct {
 		X float64 `json:"x"`
@@ -136,11 +153,17 @@ func parseBattery(payload []byte) (repository.BatteryRow, error) {
 	if err := json.Unmarshal(payload, &env); err != nil {
 		return repository.BatteryRow{}, fmt.Errorf("envelope 파싱 실패: %w", err)
 	}
+	if !validUUID(env.EventID) || env.RobotID == "" || utf8.RuneCountInString(env.RobotID) > 64 || utf8.RuneCountInString(env.RuntimeID) > 36 {
+		return repository.BatteryRow{}, fmt.Errorf("invalid telemetry identity")
+	}
 	var data struct {
 		Level float64 `json:"level"`
 	}
 	if err := json.Unmarshal(env.Data, &data); err != nil {
 		return repository.BatteryRow{}, fmt.Errorf("battery data 파싱 실패: %w", err)
+	}
+	if math.Abs(data.Level) > math.MaxFloat32 {
+		return repository.BatteryRow{}, fmt.Errorf("battery level exceeds DB range")
 	}
 	ts, err := time.Parse(time.RFC3339Nano, env.Timestamp)
 	if err != nil {
@@ -160,11 +183,17 @@ func parseStatus(payload []byte) (repository.StatusRow, error) {
 	if err := json.Unmarshal(payload, &env); err != nil {
 		return repository.StatusRow{}, fmt.Errorf("envelope 파싱 실패: %w", err)
 	}
+	if !validUUID(env.EventID) || env.RobotID == "" || utf8.RuneCountInString(env.RobotID) > 64 || utf8.RuneCountInString(env.RuntimeID) > 36 {
+		return repository.StatusRow{}, fmt.Errorf("invalid telemetry identity")
+	}
 	var data struct {
 		State string `json:"state"`
 	}
 	if err := json.Unmarshal(env.Data, &data); err != nil {
 		return repository.StatusRow{}, fmt.Errorf("status data 파싱 실패: %w", err)
+	}
+	if utf8.RuneCountInString(data.State) > 32 {
+		return repository.StatusRow{}, fmt.Errorf("status state exceeds DB length")
 	}
 	ts, err := time.Parse(time.RFC3339Nano, env.Timestamp)
 	if err != nil {
@@ -183,6 +212,9 @@ func parseAck(payload []byte) (repository.AckRow, error) {
 	var env ackEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
 		return repository.AckRow{}, fmt.Errorf("ack 파싱 실패: %w", err)
+	}
+	if !validUUID(env.CmdID) || env.RobotID == "" || utf8.RuneCountInString(env.RobotID) > 64 {
+		return repository.AckRow{}, fmt.Errorf("invalid Ack identity")
 	}
 	switch env.Status {
 	case "accepted", "done", "failed":
@@ -219,7 +251,7 @@ func validUUID(value string) bool {
 			}
 			continue
 		}
-		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f') {
+		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f' || char >= 'A' && char <= 'F') {
 			return false
 		}
 	}

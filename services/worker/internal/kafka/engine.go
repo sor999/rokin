@@ -51,6 +51,7 @@ type batch struct {
 	messages []Message
 	bytes    int
 	attempts int
+	blocked  bool
 	retryAt  time.Time
 }
 type partitionState struct {
@@ -217,16 +218,14 @@ func (e *Engine) schedule(now time.Time, draining bool) {
 			p.batch = b
 		}
 		b := p.batch
-		if now.Before(b.retryAt) {
+		if b.blocked || now.Before(b.retryAt) {
 			continue
 		}
 		p.running = true
 		e.active++
 		go func(p *partitionState, b *batch) {
-			ctx, cancel := context.WithTimeout(p.ctx, e.limits.OperationTimeout)
 			started := time.Now()
-			err := e.process(ctx, b.messages)
-			cancel()
+			err := e.process(p.ctx, b.messages)
 			e.done <- completion{p, b, err, time.Since(started)}
 		}(p, b)
 	}
@@ -257,7 +256,7 @@ func (e *Engine) complete(c completion) {
 			p.blocked = true
 			e.observer.Blocked(e.lane)
 			log.Printf("[Blocked] topic=%s partition=%d offset=%d err=%v", p.key.Topic, p.key.ID, b.messages[0].Offset, c.err)
-			b.retryAt = time.Now().Add(100 * 365 * 24 * time.Hour)
+			b.blocked = true
 			return
 		}
 		b.attempts++
