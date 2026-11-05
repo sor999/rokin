@@ -29,7 +29,7 @@ public class RobotSnapshotRepository {
     private List<RobotStatusDto> query(String after, Integer limit, String robotId) {
         String sql = """
                 WITH decision AS (SELECT clock_timestamp() AS now),
-                current_runtime AS (SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1),
+                current_runtime AS (SELECT CASE WHEN lease_expires_at IS NULL OR lease_expires_at>clock_timestamp() THEN runtime_id ELSE NULL END AS runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1),
                 robots AS (
                     SELECT s.robot_id, (SELECT runtime_id FROM current_runtime) AS runtime_id, TRUE AS managed
                     FROM simulation_robot s WHERE s.fleet_id = ? AND s.desired_state = 'RUNNING'

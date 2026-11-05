@@ -50,6 +50,14 @@ public class SimulationInternalController {
         service.registerRuntime(registration.runtimeId());
     }
 
+    @PostMapping("/lease")
+    public com.robot.fleet.domain.simulation.dto.RuntimeLeaseDto lease(
+            @RequestHeader(value="X-Simulator-Token",required=false) String candidate,
+            @RequestBody RuntimeRegistration registration) {
+        authenticate(candidate);
+        return service.lease(registration.runtimeId());
+    }
+
     @PostMapping("/reports")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void report(@RequestHeader(value = "X-Simulator-Token", required = false) String candidate,

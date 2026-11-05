@@ -96,7 +96,8 @@ class FleetCommandRouter:
 class ManagedFleetCommandRouter(FleetCommandRouter):
     """단일 관리 런타임의 동적 명세와 실행 인스턴스를 검증한다."""
 
-    def __init__(self, fleet_id, publish, runtime_id):
+    def __init__(self, fleet_id, publish, runtime_id, lease=None):
+        self.lease=lease
         import threading
         super().__init__(fleet_id, ['managed_placeholder'], publish)
         self.runtime_id = runtime_id
@@ -106,7 +107,7 @@ class ManagedFleetCommandRouter(FleetCommandRouter):
 
     def consumer_group(self, prefix):
         super().consumer_group(prefix)
-        return f'{prefix}.{self.fleet_id}.managed.v1'
+        return (f'{prefix}.{self.fleet_id}.managed.lease.{self.lease.epoch}' if self.lease else f'{prefix}.{self.fleet_id}.managed.v1')
 
     def add(self, robot_id, version):
         with self.ownership_lock:
@@ -120,6 +121,10 @@ class ManagedFleetCommandRouter(FleetCommandRouter):
 
     def dispatch(self, command):
         with self.ownership_lock:
+            if self.lease and not self.lease.active():
+                raise RuntimeError('Runtime lease expired')
+            if self.lease and isinstance(command,dict) and command.get('fleet_id')==self.fleet_id and (type(command.get('simulation_epoch')) is not int or command.get('simulation_epoch')!=self.lease.epoch):
+                raise CommandRejected('Stale runtime fencing token')
             if isinstance(command, dict) and command.get('fleet_id') == self.fleet_id:
                 rid = command.get('robot_id')
                 version = self.versions.get(rid) if isinstance(rid, str) else None

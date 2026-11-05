@@ -83,6 +83,8 @@ logging:
     org.apache.kafka: ERROR
 
 simulation:
+  lease-enabled: ${SIMULATOR_LEASE_ENABLED:false}
+  lease-millis: ${SIMULATOR_LEASE_MILLIS:12000}
   internal-token: ${SIMULATOR_INTERNAL_TOKEN:}
   max-robots: ${SIMULATOR_MAX_ROBOTS:20}
 

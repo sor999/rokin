@@ -86,7 +86,7 @@ public class SimulationRepository {
         jdbc.update("""
                 UPDATE simulation_robot SET runtime_state = ?, error = ?, runtime_id = ?, reported_at = clock_timestamp()
                 WHERE robot_id = ? AND fleet_id = ? AND config_version = ?
-                AND ? = (SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1)
+                AND ? = (SELECT CASE WHEN lease_expires_at IS NULL OR lease_expires_at > clock_timestamp() THEN runtime_id ELSE NULL END FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1)
                 AND (? = 'FAILED' OR (desired_state = 'DELETED' AND ? = 'DELETED')
                     OR (desired_state = 'RUNNING' AND ? <> 'DELETED'))
                 """, report.state(), report.error(), report.runtimeId(), report.robotId(), fleetId, report.version(),
@@ -97,8 +97,8 @@ public class SimulationRepository {
     }
 
     public Optional<String> currentRuntime(String fleetId) {
-        return jdbc.query("SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1",
-                (rs, n) -> rs.getString(1), fleetId).stream().findFirst();
+        return jdbc.query("SELECT CASE WHEN lease_expires_at IS NULL OR lease_expires_at > clock_timestamp() THEN runtime_id ELSE NULL END FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1",
+                (rs, n) -> rs.getString(1), fleetId).stream().filter(java.util.Objects::nonNull).findFirst();
     }
 
     public boolean runtimeUsed(String runtimeId) {
@@ -115,9 +115,28 @@ public class SimulationRepository {
                 SELECT CASE WHEN EXISTS(SELECT 1 FROM simulation_robot WHERE robot_id = ?)
                 THEN EXISTS(SELECT 1 FROM simulation_robot WHERE robot_id = ? AND fleet_id = ?
                     AND desired_state = 'RUNNING' AND ? = (
-                        SELECT runtime_id FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1))
+                        SELECT CASE WHEN lease_expires_at IS NULL OR lease_expires_at > clock_timestamp() THEN runtime_id ELSE NULL END FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1))
                 ELSE ? END
                 """, Boolean.class, robotId, robotId, fleetId, runtimeId, fleetId, runtimeId == null));
+    }
+
+    public record RuntimeOwner(String runtimeId, long epoch, OffsetDateTime expiresAt) { }
+
+    public Optional<RuntimeOwner> runtimeOwner(String fleet) {
+        return jdbc.query("SELECT runtime_id,epoch,lease_expires_at FROM simulation_runtime_session WHERE fleet_id=? ORDER BY epoch DESC LIMIT 1",
+                (rs,n)->new RuntimeOwner(rs.getString(1),rs.getLong(2),rs.getObject(3,OffsetDateTime.class)),fleet).stream().findFirst();
+    }
+
+    public boolean leaseContractUsed(String fleet) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM simulation_runtime_session WHERE fleet_id=? AND lease_expires_at IS NOT NULL)",Boolean.class,fleet));
+    }
+
+    public void createLease(String fleet,String runtime,long ttl) {
+        jdbc.update("INSERT INTO simulation_runtime_session(runtime_id,fleet_id,lease_expires_at) VALUES (?,?,clock_timestamp()+(? * INTERVAL '0.001' SECOND))",runtime,fleet,ttl);
+    }
+
+    public boolean renewLease(String fleet,String runtime,long ttl) {
+        return jdbc.update("UPDATE simulation_runtime_session SET lease_expires_at=clock_timestamp()+(? * INTERVAL '0.001' SECOND) WHERE fleet_id=? AND runtime_id=? AND lease_expires_at>clock_timestamp()",ttl,fleet,runtime)==1;
     }
 
 }

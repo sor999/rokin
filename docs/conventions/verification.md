@@ -147,3 +147,14 @@ telemetry 토픽을 사용하며 `robot_1`을 생성하므로 전용 DDS 도메�
 - 실제 10분 DB 중단, Ack 격리, RSS와 lag 및 Worker 증설과 축소는
   [Worker 실행 문서](../features/worker-backpressure.md)의 격리 환경에서 별도 수행
 - 검증 도구는 별도 프로젝트를 사용하며 기존 볼륨과 커밋 위치를 초기화하지 않음
+
+## ROS 런타임 장애 인계 검증
+
+- `PRESENCE_TEST_URL`에서 RuntimeLeasePostgresTest가 V14, 실제 잠금과 단일 승자,
+  만료 및 이전 UUID 차단과 준비 전 명령 거부를 검증한다.
+- ROS의 test_runtime_lease.py에서 기한, 늦은 갱신, epoch와 DDS 격리를 검증한다.
+- `COMMAND_DURABLE_ENABLED=true scripts/failover/lab.sh up`과
+  `python3 scripts/failover/verify.py --output /tmp/runtime-failover.json`으로 강제 종료,
+  관리 API 단절, 컨테이너 전체 정지를 실제 주입한다. 개발 서비스와 분리된 프로젝트다.
+- 종료는 `scripts/failover/lab.sh stop`을 사용하며 볼륨은 보존한다.
+- 전환 및 측정 범위는 [실행 문서](../features/runtime-failover.md)를 따른다.

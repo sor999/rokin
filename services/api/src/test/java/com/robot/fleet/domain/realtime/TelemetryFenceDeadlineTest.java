@@ -35,7 +35,7 @@ class TelemetryFenceDeadlineTest {
             try {
                 sql.execute("CREATE VIEW " + schema + ".simulation_robot AS SELECT 'robot_1'::text AS robot_id, "
                         + "'default'::text AS fleet_id, 'RUNNING'::text AS desired_state FROM pg_sleep(5)");
-                sql.execute("CREATE TABLE " + schema + ".simulation_runtime_session(runtime_id text, fleet_id text, epoch bigint)");
+                sql.execute("CREATE TABLE " + schema + ".simulation_runtime_session(runtime_id text, fleet_id text, epoch bigint, lease_expires_at timestamptz)");
                 var dataSource = new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?")
                         + "currentSchema=" + schema + "&socketTimeout=2&cancelSignalTimeout=1", user, password);
                 var target = new SimulationService(new SimulationRepository(new JdbcTemplate(dataSource)),

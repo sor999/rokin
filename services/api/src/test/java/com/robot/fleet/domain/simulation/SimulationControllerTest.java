@@ -80,4 +80,17 @@ class SimulationControllerTest {
         verify(service).registerRuntime(runtime);
     }
 
+    @Test @DisplayName("lease는 토큰 인증 후 실행 권한과 epoch를 반환한다")
+    void internalLease_RequiresTokenAndReturnsGrant() throws Exception {
+        // given
+        String runtime="00000000-0000-0000-0000-000000000001";
+        String body="{\"runtimeId\":\""+runtime+"\"}";
+        when(service.lease(runtime)).thenReturn(new com.robot.fleet.domain.simulation.dto.RuntimeLeaseDto("default",runtime,7,true,false,12000));
+        // when, then
+        mvc.perform(post("/internal/simulations/lease").contentType("application/json").content(body)).andExpect(status().isUnauthorized());
+        verifyNoInteractions(service);
+        mvc.perform(post("/internal/simulations/lease").header("X-Simulator-Token","test-only-token").contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.epoch").value(7)).andExpect(jsonPath("$.granted").value(true));
+    }
+
 }

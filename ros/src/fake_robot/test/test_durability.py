@@ -29,6 +29,25 @@ class DeliveryJournalTest(unittest.TestCase):
                     command_sequence=seq,
                     expires_at=(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=expiry)).isoformat())
 
+    def test_standby_recovery_does_not_turn_completed_result_unknown(self):
+        cmd=self.command(action='stop')
+        self.journal.enqueue(cmd)
+        acks=self.journal.execute(cmd,lambda:[CommandAck(cmd['cmd_id'],'done','stopped')])
+        self.journal.recover_fleet('default')
+        self.assertFalse(self.journal.receipts()[0]['outcomeUnknown'])
+        self.journal.confirmed([ack['event_id'] for ack in acks])
+        self.journal.maximum=1
+        self.assertTrue(self.journal.healthy())
+
+    def test_standby_startup_keeps_pending_inbox_as_unknown(self):
+        cmd=self.command()
+        self.journal.enqueue(cmd)
+        self.journal.recover_fleet('default')
+        self.assertEqual([],self.journal.pending())
+        self.assertEqual(cmd['cmd_id'],self.journal.receipts()[0]['cmdId'])
+        self.assertTrue(self.journal.receipts()[0]['outcomeUnknown'])
+        self.assertEqual(1,self.journal.db.execute('SELECT count(*) FROM inbox').fetchone()[0])
+
     def test_intent_survives_process_exit_without_reexecution(self):
         cmd = self.command()
         self.journal.enqueue(cmd)
