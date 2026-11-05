@@ -308,3 +308,27 @@ func TestGlobalPressurePausesOtherPartitions(t *testing.T) {
 		t.Fatal("half usage did not resume lane")
 	}
 }
+
+func TestReassignmentClearsPreviousNativePause(t *testing.T) {
+	e, d, p := setup(t, func(context.Context, []Message) error { return nil })
+	for i := 0; i < 4; i++ {
+		e.admit(message(p, int64(i)))
+	}
+	e.controls(false)
+	if !d.paused[p] {
+		t.Fatal("partition not paused before revoke")
+	}
+	if err := e.assign([]Partition{p}); err != nil {
+		t.Fatal(err)
+	}
+	if d.paused[p] || e.count != 0 || e.bytes != 0 {
+		t.Fatal("new assignment inherited native pause")
+	}
+	e.admit(message(p, 8))
+	e.schedule(time.Now(), true)
+	finish(t, e)
+	e.commits()
+	if len(d.commits) != 1 || d.commits[0] != 9 {
+		t.Fatal("new assignment cannot progress", d.commits)
+	}
+}

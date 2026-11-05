@@ -101,6 +101,13 @@ func (e *Engine) assign(keys []Partition) error {
 	if err := e.driver.Assign(keys); err != nil {
 		return err
 	}
+	// librdkafka의 이전 할당 Pause 상태는 새 애플리케이션 상태와 별도로 남을 수 있다.
+	for _, key := range keys {
+		if err := e.driver.Pause(key, false); err != nil {
+			return err
+		}
+	}
+
 	e.generation++
 	for _, key := range keys {
 		ctx, cancel := context.WithCancel(e.work)
