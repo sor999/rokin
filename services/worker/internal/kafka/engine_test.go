@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"errors"
+	ck "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"testing"
 	"time"
 )
@@ -242,5 +243,20 @@ func TestRoundRobinAndRawBatchLimit(t *testing.T) {
 	finish(t, e)
 	if e.states[q].count != 0 {
 		t.Fatal("partition starved")
+	}
+}
+
+func TestRetainedOffsetNeverResetsExistingGroup(t *testing.T) {
+	for _, tc := range []struct {
+		committed ck.Offset
+		want      int64
+		fail      bool
+	}{
+		{ck.OffsetInvalid, 10, false}, {10, 10, false}, {20, 20, false}, {9, 0, true}, {21, 0, true},
+	} {
+		got, err := retainedOffset(tc.committed, 10, 20)
+		if (err != nil) != tc.fail || (!tc.fail && got != tc.want) {
+			t.Fatalf("offset=%d got=%d err=%v", tc.committed, got, err)
+		}
 	}
 }

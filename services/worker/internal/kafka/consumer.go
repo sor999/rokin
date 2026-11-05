@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	ck "github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -23,6 +24,8 @@ type Consumer struct {
 	dlqTopic     string
 	metrics      *observability.Metrics
 	messageBytes int
+	pending      *Event
+	committed    map[Partition]int64
 }
 
 func NewConsumer(broker, groupID string, topics []string, dlqTopic string, metrics *observability.Metrics, limits Limits) (*Consumer, error) {
@@ -46,12 +49,27 @@ func NewConsumer(broker, groupID string, topics []string, dlqTopic string, metri
 		kc.Close()
 		return nil, err
 	}
-	if err = kc.SubscribeTopics(topics, nil); err != nil {
+	c := &Consumer{committed: make(map[Partition]int64), kc: kc, dlq: dlq, dlqTopic: dlqTopic, metrics: metrics, messageBytes: limits.MessageBytes}
+	// Poll 모드에서도 callback 안에서 할당을 명시해 클라이언트의 자동 할당을 막는다.
+	if err = kc.SubscribeTopics(topics, func(kc *ck.Consumer, event ck.Event) error {
+		switch ev := event.(type) {
+		case ck.AssignedPartitions:
+			c.pending = &Event{Assigned: partitions(ev.Partitions)}
+		case ck.RevokedPartitions:
+			c.pending = &Event{Revoked: partitions(ev.Partitions)}
+		}
+		// 검증된 시작 위치는 Engine이 같은 Poll 소유 루프에서 곧바로 적용한다.
+		err := kc.Unassign()
+		if err != nil {
+			c.pending = &Event{Err: err}
+		}
+		return err
+	}); err != nil {
 		kc.Close()
 		dlq.Close()
 		return nil, err
 	}
-	return &Consumer{kc: kc, dlq: dlq, dlqTopic: dlqTopic, metrics: metrics, messageBytes: limits.MessageBytes}, nil
+	return c, nil
 }
 
 func partitions(ps []ck.TopicPartition) []Partition {
@@ -66,9 +84,16 @@ func topicPartition(p Partition) ck.TopicPartition {
 }
 
 func (c *Consumer) Poll(ms int) Event {
-	switch ev := c.kc.Poll(ms).(type) {
+	event := c.kc.Poll(ms)
+	if c.pending != nil {
+		event := *c.pending
+		c.pending = nil
+		return event
+	}
+	switch ev := event.(type) {
 	case *ck.Message:
 		c.metrics.ObserveMessage(*ev.TopicPartition.Topic)
+		c.observeLag(Partition{*ev.TopicPartition.Topic, ev.TopicPartition.Partition})
 		return Event{Message: &Message{*ev.TopicPartition.Topic, ev.Value, ev.TopicPartition.Partition, int64(ev.TopicPartition.Offset)}}
 	case ck.AssignedPartitions:
 		return Event{Assigned: partitions(ev.Partitions)}
@@ -94,23 +119,31 @@ func (c *Consumer) Assign(keys []Partition) error {
 	}
 	for i, p := range committed {
 		if p.Error != nil {
-			return p.Error
+			missing, ok := p.Error.(ck.Error)
+			if !ok || missing.Code() != ck.ErrNoOffset {
+				return p.Error
+			}
 		}
 		low, high, err := c.kc.QueryWatermarkOffsets(*p.Topic, p.Partition, 3000)
 		if err != nil {
 			return err
 		}
-		offset := int64(p.Offset)
-		if p.Offset == ck.OffsetInvalid {
-			offset = low
-		} else if offset < low || offset > high {
-			return fmt.Errorf("retained offset missing topic=%s partition=%d committed=%d range=[%d,%d]", *p.Topic, p.Partition, offset, low, high)
+		offset, err := retainedOffset(p.Offset, low, high)
+		if err != nil {
+			return fmt.Errorf("topic=%s partition=%d: %w", *p.Topic, p.Partition, err)
 		}
 		ps[i].Offset = ck.Offset(offset)
+		c.committed[keys[i]] = offset
 	}
 	return c.kc.Assign(ps)
 }
-func (c *Consumer) Unassign() error { return c.kc.Unassign() }
+func (c *Consumer) Unassign() error {
+	for key := range c.committed {
+		c.metrics.SetLag(key.Topic, strconv.Itoa(int(key.ID)), 0)
+	}
+	c.committed = make(map[Partition]int64)
+	return c.kc.Unassign()
+}
 func (c *Consumer) Pause(p Partition, paused bool) error {
 	ps := []ck.TopicPartition{topicPartition(p)}
 	if paused {
@@ -134,6 +167,10 @@ func (c *Consumer) Commit(p Partition, offset int64) error {
 				break
 			}
 		}
+	}
+	if err == nil {
+		c.committed[p] = offset
+		c.observeLag(p)
 	}
 	c.metrics.ObserveOffsetCommit(p.Topic, err == nil)
 	return err
@@ -183,4 +220,24 @@ func (a MetricsAdapter) Rebalance(lane string) { a.Metrics.ObserveControl(lane, 
 func (a MetricsAdapter) Blocked(lane string)   { a.Metrics.ObserveControl(lane, "blocked") }
 func (a MetricsAdapter) Batch(topic string, size int, duration time.Duration, ok bool) {
 	a.Metrics.ObserveBatch(topic, size, duration, ok)
+}
+
+func (c *Consumer) observeLag(p Partition) {
+	if offset, ok := c.committed[p]; ok {
+		_, high, err := c.kc.GetWatermarkOffsets(p.Topic, p.ID)
+		if err == nil && high >= 0 {
+			c.metrics.SetLag(p.Topic, strconv.Itoa(int(p.ID)), high-offset)
+		}
+	}
+}
+
+func retainedOffset(committed ck.Offset, low, high int64) (int64, error) {
+	if committed == ck.OffsetInvalid {
+		return low, nil
+	}
+	offset := int64(committed)
+	if offset < low || offset > high {
+		return 0, fmt.Errorf("retained offset missing: committed=%d range=[%d,%d]", offset, low, high)
+	}
+	return offset, nil
 }
