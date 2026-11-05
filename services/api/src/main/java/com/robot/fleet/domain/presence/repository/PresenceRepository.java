@@ -13,7 +13,7 @@ public class PresenceRepository {
     public record Expired(String robotId, String runtimeId, OffsetDateTime observedAt) { }
     private final JdbcTemplate jdbc;
 
-    public static final String CURRENT_OWNER = """
+    public static final String CURRENT_IDENTITY = """
             (NOT EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id)
                 AND p.runtime_id = ''
              OR EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id
@@ -21,6 +21,12 @@ public class PresenceRepository {
                 AND p.runtime_id = (SELECT r.runtime_id FROM simulation_runtime_session r
                     WHERE r.fleet_id = p.fleet_id ORDER BY r.epoch DESC LIMIT 1)))
             """;
+
+    public static final String LEASE_LIVE = """
+            NOT EXISTS(SELECT 1 FROM simulation_runtime_session r WHERE r.fleet_id=p.fleet_id
+                AND r.runtime_id=p.runtime_id AND r.lease_expires_at IS NOT NULL AND r.lease_expires_at<=clock_timestamp())
+            """;
+    public static final String CURRENT_OWNER = "("+CURRENT_IDENTITY+" AND "+LEASE_LIVE+")";
 
     public static final String READY = """
             (NOT EXISTS (SELECT 1 FROM simulation_robot s WHERE s.robot_id = p.robot_id)
@@ -70,7 +76,7 @@ public class PresenceRepository {
                 WITH decision AS MATERIALIZED (SELECT clock_timestamp() AS now)
                 SELECT p.robot_id, p.runtime_id, p.source_timestamp FROM robot_presence p CROSS JOIN decision d
                 WHERE p.fleet_id = ? AND (p.observed_at < d.now - (? * INTERVAL '1' SECOND)
-                OR NOT """ + READY + ") AND " + CURRENT_OWNER, (rs, n) -> new Expired(rs.getString(1),
+                OR NOT """ + READY + " OR NOT ("+LEASE_LIVE+")) AND " + CURRENT_IDENTITY, (rs, n) -> new Expired(rs.getString(1),
                 rs.getString(2).isEmpty() ? null : rs.getString(2), rs.getObject(3, OffsetDateTime.class)), fleet, ttl);
     }
 

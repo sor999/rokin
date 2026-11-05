@@ -105,7 +105,7 @@ class ManagedHttpBatchTest(unittest.TestCase):
         reports = queue.Queue()
         reports.put([{'robotId': f'robot_{i}'} for i in range(201)])
         runtime = SimpleNamespace(stop_event=Mock(), snapshots=queue.Queue(maxsize=1), reports=reports,
-                                  runtime_id='current-runtime', fleet_id='default',
+                                  runtime_id='current-runtime', fleet_id='default', lease=None,
                                   replace_latest=SimulationManager.replace_latest)
         runtime.stop_event.is_set.side_effect = [False, True]
         runtime.request = Mock(return_value={'fleetId': 'default', 'simulations': []})
@@ -122,7 +122,7 @@ class ManagedHttpBatchTest(unittest.TestCase):
         from unittest.mock import Mock
         from ros_kafka_bridge.bridge_node import RosKafkaBridgeNode
         producer = Mock()
-        bridge = SimpleNamespace(_runtime_id='current-runtime', _producer=producer, get_logger=Mock(return_value=Mock()))
+        bridge = SimpleNamespace(lease=None, _runtime_id='current-runtime', _producer=producer, get_logger=Mock(return_value=Mock()))
         for value in ([], 'text', 1, None, True):
             RosKafkaBridgeNode._on_status(bridge, 'robot_4', SimpleNamespace(data=json.dumps(value)))
         producer.produce.assert_not_called()
