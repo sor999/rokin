@@ -28,6 +28,7 @@ type Consumer struct {
 	committed    map[Partition]int64
 }
 
+// NewConsumer는 수동 커밋과 제한된 native 큐를 사용하는 클라이언트를 생성한다.
 func NewConsumer(broker, groupID string, topics []string, dlqTopic string, metrics *observability.Metrics, limits Limits) (*Consumer, error) {
 	kc, err := ck.NewConsumer(&ck.ConfigMap{
 		"bootstrap.servers": broker, "group.id": groupID,
@@ -73,6 +74,7 @@ func NewConsumer(broker, groupID string, topics []string, dlqTopic string, metri
 	return c, nil
 }
 
+// partitions는 Kafka 할당을 스케줄러의 파티션 식별자로 변환한다.
 func partitions(ps []ck.TopicPartition) []Partition {
 	out := make([]Partition, 0, len(ps))
 	for _, p := range ps {
@@ -80,10 +82,13 @@ func partitions(ps []ck.TopicPartition) []Partition {
 	}
 	return out
 }
+
+// topicPartition은 토픽과 파티션을 Kafka 클라이언트 식별자로 변환한다.
 func topicPartition(p Partition) ck.TopicPartition {
 	return ck.TopicPartition{Topic: &p.Topic, Partition: p.ID}
 }
 
+// Poll은 소유 루프에 메시지와 명시적인 재할당 이벤트를 전달한다.
 func (c *Consumer) Poll(ms int) Event {
 	event := c.kc.Poll(ms)
 	if c.pending != nil {
@@ -109,6 +114,7 @@ func (c *Consumer) Poll(ms int) Event {
 	return Event{}
 }
 
+// Assign은 보존 범위와 기존 커밋을 검증해 시작 위치를 설정한다.
 func (c *Consumer) Assign(keys []Partition) error {
 	ps := make([]ck.TopicPartition, 0, len(keys))
 	for _, key := range keys {
@@ -138,6 +144,8 @@ func (c *Consumer) Assign(keys []Partition) error {
 	}
 	return c.kc.Assign(ps)
 }
+
+// Unassign은 이전 소유 파티션의 lag와 할당을 해제한다.
 func (c *Consumer) Unassign() error {
 	for key := range c.committed {
 		c.metrics.SetLag(key.Topic, strconv.Itoa(int(key.ID)), 0)
@@ -145,6 +153,8 @@ func (c *Consumer) Unassign() error {
 	c.committed = make(map[Partition]int64)
 	return c.kc.Unassign()
 }
+
+// Pause는 해당 파티션의 소비를 중지하거나 재개한다.
 func (c *Consumer) Pause(p Partition, paused bool) error {
 	ps := []ck.TopicPartition{topicPartition(p)}
 	if paused {
@@ -152,11 +162,15 @@ func (c *Consumer) Pause(p Partition, paused bool) error {
 	}
 	return c.kc.Resume(ps)
 }
+
+// Seek는 수용하지 못한 메시지의 원래 위치로 소비 커서를 이동한다.
 func (c *Consumer) Seek(msg Message) error {
 	p := topicPartition(Partition{msg.Topic, msg.Partition})
 	p.Offset = ck.Offset(msg.Offset)
 	return c.kc.Seek(p, 3000)
 }
+
+// Commit은 다음 읽을 위치를 저장하고 파티션별 오류를 확인한다.
 func (c *Consumer) Commit(p Partition, offset int64) error {
 	tp := topicPartition(p)
 	tp.Offset = ck.Offset(offset)
@@ -176,6 +190,8 @@ func (c *Consumer) Commit(p Partition, offset int64) error {
 	c.metrics.ObserveOffsetCommit(p.Topic, err == nil)
 	return err
 }
+
+// Close는 완료 작업 정리 후 Consumer와 DLQ Producer를 종료한다.
 func (c *Consumer) Close() { c.kc.Close(); c.dlq.Close() }
 
 // SendToDLQ는 전달 확인까지만 기다린다. 취소 후에도 delivery 채널은 producer가 소유한다.
@@ -213,16 +229,26 @@ func (c *Consumer) SendToDLQ(ctx context.Context, topic string, payload []byte, 
 // MetricsAdapter는 스케줄러의 예약량과 실행 결과를 수집한다.
 type MetricsAdapter struct{ Metrics *observability.Metrics }
 
+// Queue는 예약량과 중지 파티션 수를 기록한다.
 func (a MetricsAdapter) Queue(lane string, count, bytes, paused int) {
 	a.Metrics.SetQueue(lane, count, bytes, paused)
 }
-func (a MetricsAdapter) Retry(lane string)     { a.Metrics.ObserveControl(lane, "retry") }
+
+// Retry는 lane의 배치 재시도를 기록한다.
+func (a MetricsAdapter) Retry(lane string) { a.Metrics.ObserveControl(lane, "retry") }
+
+// Rebalance는 lane의 할당 변경을 기록한다.
 func (a MetricsAdapter) Rebalance(lane string) { a.Metrics.ObserveControl(lane, "rebalance") }
-func (a MetricsAdapter) Blocked(lane string)   { a.Metrics.ObserveControl(lane, "blocked") }
+
+// Blocked는 운영 확인이 필요한 파티션 중지를 기록한다.
+func (a MetricsAdapter) Blocked(lane string) { a.Metrics.ObserveControl(lane, "blocked") }
+
+// Batch는 DB 배치 실행 결과와 지연을 기록한다.
 func (a MetricsAdapter) Batch(topic string, size int, duration time.Duration, ok bool) {
 	a.Metrics.ObserveBatch(topic, size, duration, ok)
 }
 
+// observeLag는 캐시된 high watermark 기준의 커밋 지연을 기록한다.
 func (c *Consumer) observeLag(p Partition) {
 	if offset, ok := c.committed[p]; ok {
 		_, high, err := c.kc.GetWatermarkOffsets(p.Topic, p.ID)
@@ -232,6 +258,7 @@ func (c *Consumer) observeLag(p Partition) {
 	}
 }
 
+// retainedOffset은 새 group만 보존 시작점을 선택하고 기존 위치 유실은 거부한다.
 func retainedOffset(committed ck.Offset, low, high int64) (int64, error) {
 	if committed == ck.OffsetInvalid {
 		return low, nil

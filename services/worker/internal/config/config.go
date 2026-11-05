@@ -24,6 +24,7 @@ type Config struct {
 	Telemetry, Ack kafkapkg.Limits
 }
 
+// Load는 환경 설정을 읽고 소비 및 종료 제한을 검증한다.
 func Load() (*Config, error) {
 	batchSize, err := strconv.Atoi(getEnv("BATCH_SIZE", "100"))
 	if err != nil {
@@ -86,6 +87,7 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// getEnv는 비어 있지 않은 환경 값 또는 기본값을 반환한다.
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -93,6 +95,7 @@ func getEnv(key, defaultVal string) string {
 	return defaultVal
 }
 
+// loadLimits는 한 lane의 예약 예산과 Kafka 수신 한도를 함께 검증한다.
 func loadLimits(prefix string, count, bytes, concurrency, native, batch, flush int) (kafkapkg.Limits, error) {
 	l := kafkapkg.Limits{Messages: count, Bytes: bytes, PartitionMessages: 256, PartitionBytes: 16 << 20,
 		BatchSize: batch, BatchBytes: 1 << 20, MessageBytes: 1 << 20, Concurrency: concurrency, NativeQueueKiB: native}
@@ -112,7 +115,7 @@ func loadLimits(prefix string, count, bytes, concurrency, native, batch, flush i
 	operation, shutdown := 5000, 20000
 	for key, dest := range map[string]*int{"DB_OPERATION_TIMEOUT_MS": &operation, "SHUTDOWN_TIMEOUT_MS": &shutdown} {
 		value, err := strconv.Atoi(getEnv(key, strconv.Itoa(*dest)))
-		if err != nil || value <= 0 || value > 60000 {
+		if err != nil || value <= 0 || value > 60000 || (key == "SHUTDOWN_TIMEOUT_MS" && value > 20000) {
 			return l, fmt.Errorf("invalid timeout %s", key)
 		}
 		*dest = value
@@ -120,7 +123,7 @@ func loadLimits(prefix string, count, bytes, concurrency, native, batch, flush i
 	l.Flush = time.Duration(flush) * time.Millisecond
 	l.OperationTimeout = time.Duration(operation) * time.Millisecond
 	l.ShutdownTimeout = time.Duration(shutdown) * time.Millisecond
-	if l.MessageBytes > l.BatchBytes || kafkapkg.Reservation(l.MessageBytes) > l.Bytes || kafkapkg.Reservation(l.MessageBytes) > l.PartitionBytes || l.Concurrency > 100 || batch > 100000 || flush > 60000 || l.NativeQueueKiB > 1<<20 {
+	if l.MessageBytes > l.BatchBytes || kafkapkg.Reservation(l.MessageBytes) > l.Bytes || kafkapkg.Reservation(l.MessageBytes) > l.PartitionBytes || l.Concurrency > 100 || batch > 100000 || flush > 60000 || l.NativeQueueKiB > 1<<20 || l.NativeQueueKiB*1024 < l.MessageBytes {
 		return l, fmt.Errorf("inconsistent limits for %s", prefix)
 	}
 	return l, nil

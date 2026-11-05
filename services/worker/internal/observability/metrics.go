@@ -186,6 +186,7 @@ func resultLabel(succeeded bool) string {
 	return "failure"
 }
 
+// SetQueue는 lane의 예약 예산 사용량과 중지 시간을 기록한다.
 func (m *Metrics) SetQueue(lane string, count, bytes, paused int) {
 	m.pauseMu.Lock()
 	now := time.Now()
@@ -198,8 +199,11 @@ func (m *Metrics) SetQueue(lane string, count, bytes, paused int) {
 	m.queue.WithLabelValues(lane, "reserved_bytes").Set(float64(bytes))
 	m.queue.WithLabelValues(lane, "paused_partitions").Set(float64(paused))
 }
+
+// ObserveControl은 lane별 재시도와 할당 변경 및 중지를 기록한다.
 func (m *Metrics) ObserveControl(lane, event string) { m.controls.WithLabelValues(lane, event).Inc() }
 
+// SetLag는 조회된 파티션 lag를 음수 없이 기록한다.
 func (m *Metrics) SetLag(topic, partition string, lag int64) {
 	if lag < 0 {
 		lag = 0

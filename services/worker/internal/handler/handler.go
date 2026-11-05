@@ -49,6 +49,7 @@ type Handler struct {
 	timeout time.Duration
 }
 
+// New는 저장소와 DLQ 경계 및 개별 작업의 제한 시간을 연결한다.
 func New(repo Store, dlq DeadLetter, operationTimeout ...time.Duration) *Handler {
 	timeout := 5 * time.Second
 	if len(operationTimeout) > 0 {
@@ -57,6 +58,7 @@ func New(repo Store, dlq DeadLetter, operationTimeout ...time.Duration) *Handler
 	return &Handler{repo: repo, dlq: dlq, timeout: timeout}
 }
 
+// Process는 파티션 배치를 저장하며 잘못된 행은 전달 확인 후 제외한다.
 func (h *Handler) Process(ctx context.Context, msgs []kafkapkg.Message) error {
 	if len(msgs) == 0 {
 		return nil
@@ -119,6 +121,7 @@ func (h *Handler) Process(ctx context.Context, msgs []kafkapkg.Message) error {
 	return nil
 }
 
+// parsePose는 DB에 저장 가능한 위치와 식별자를 추출한다.
 func parsePose(payload []byte) (repository.PoseRow, error) {
 	var env telemetryEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
@@ -148,6 +151,7 @@ func parsePose(payload []byte) (repository.PoseRow, error) {
 	}, nil
 }
 
+// parseBattery는 PostgreSQL REAL 범위 내 배터리 값을 추출한다.
 func parseBattery(payload []byte) (repository.BatteryRow, error) {
 	var env telemetryEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
@@ -178,6 +182,7 @@ func parseBattery(payload []byte) (repository.BatteryRow, error) {
 	}, nil
 }
 
+// parseStatus는 DB 길이 제한 내 상태와 runtime을 추출한다.
 func parseStatus(payload []byte) (repository.StatusRow, error) {
 	var env telemetryEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
@@ -208,6 +213,7 @@ func parseStatus(payload []byte) (repository.StatusRow, error) {
 	}, nil
 }
 
+// parseAck는 기존 및 영속 Ack의 식별자와 상태를 검증한다.
 func parseAck(payload []byte) (repository.AckRow, error) {
 	var env ackEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
@@ -240,6 +246,7 @@ func parseAck(payload []byte) (repository.AckRow, error) {
 	}, nil
 }
 
+// validUUID는 대소문자를 허용하는 표준 UUID 문자열을 확인한다.
 func validUUID(value string) bool {
 	if len(value) != 36 {
 		return false

@@ -16,6 +16,7 @@ type Limits struct {
 	NativeQueueKiB                                     int
 }
 
+// Reservation은 원본 및 파싱과 DLQ 처리에 필요한 예약 바이트를 계산한다.
 func Reservation(size int) int { return size*8 + 8192 }
 
 type Partition struct {
@@ -90,12 +91,14 @@ type Engine struct {
 	cancel               context.CancelFunc
 }
 
+// NewEngine은 독립적인 파티션 소유권과 제한된 실행 슬롯을 생성한다.
 func NewEngine(driver Driver, limits Limits, process func(context.Context, []Message) error, observer Observer, lane string) *Engine {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{driver: driver, limits: limits, process: process, observer: observer, lane: lane,
 		states: make(map[Partition]*partitionState), done: make(chan completion, limits.Concurrency), work: ctx, cancel: cancel}
 }
 
+// assign은 이전 세대를 회수하고 native Pause 상태를 초기화한다.
 func (e *Engine) assign(keys []Partition) error {
 	e.revoke()
 	if err := e.driver.Assign(keys); err != nil {
@@ -119,6 +122,7 @@ func (e *Engine) assign(keys []Partition) error {
 	return nil
 }
 
+// revoke는 할당을 취소하되 실행 중 작업의 슬롯과 예약량을 유지한다.
 func (e *Engine) revoke() {
 	for _, p := range e.states {
 		p.cancel()
@@ -138,6 +142,7 @@ func (e *Engine) revoke() {
 	e.order = nil
 }
 
+// admit는 예약 가능한 메시지만 수용하고 나머지는 같은 Kafka 위치에 남긴다.
 func (e *Engine) admit(msg Message) error {
 	key := Partition{msg.Topic, msg.Partition}
 	p := e.states[key]
@@ -166,6 +171,7 @@ func (e *Engine) admit(msg Message) error {
 	return nil
 }
 
+// controls는 최대 메시지 여유와 절반 재개 기준으로 소비를 제어한다.
 func (e *Engine) controls(draining bool) error {
 	max := Reservation(e.limits.MessageBytes)
 	globalFull := e.count+1 > e.limits.Messages || e.bytes+max > e.limits.Bytes
@@ -189,6 +195,7 @@ func (e *Engine) controls(draining bool) error {
 	return nil
 }
 
+// schedule은 파티션별 한 배치를 순환 배정하고 실패 배치를 고정한다.
 func (e *Engine) schedule(now time.Time, draining bool) {
 	n := len(e.order)
 	for checked := 0; checked < n && e.active < e.limits.Concurrency; checked++ {
@@ -238,6 +245,7 @@ func (e *Engine) schedule(now time.Time, draining bool) {
 	}
 }
 
+// bytesRaw는 예약량과 별개인 배치 원본 크기를 합산한다.
 func (b *batch) bytesRaw() int {
 	n := 0
 	for _, m := range b.messages {
@@ -246,6 +254,7 @@ func (b *batch) bytesRaw() int {
 	return n
 }
 
+// complete는 이전 세대의 커밋을 차단하고 완료된 예약량만 반환한다.
 func (e *Engine) complete(c completion) {
 	e.active--
 	p, b := c.state, c.batch
@@ -288,6 +297,7 @@ func (e *Engine) complete(c completion) {
 	p.batch = nil
 }
 
+// commits는 완료 위치를 직렬 커밋하고 실패한 위치를 다음 시도까지 보존한다.
 func (e *Engine) commits() {
 	for _, p := range e.states {
 		if p.desired > p.committed {
@@ -298,6 +308,7 @@ func (e *Engine) commits() {
 	}
 }
 
+// Run은 Poll과 재할당을 계속 처리하며 종료 기한까지 안전한 작업을 정리한다.
 func (e *Engine) Run(ctx context.Context) error {
 	defer e.driver.Close()
 	defer e.cancel()
@@ -363,6 +374,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 }
 
+// stop은 오류 시 세대를 무효화하고 작업 종료 후 오류를 반환한다.
 func (e *Engine) stop(err error) error {
 	e.cancel()
 	e.revoke()
@@ -374,4 +386,5 @@ func (e *Engine) stop(err error) error {
 
 type PermanentError struct{ Reason string }
 
+// Error는 자동 재시도할 수 없는 메시지의 중지 원인을 반환한다.
 func (e *PermanentError) Error() string { return e.Reason }

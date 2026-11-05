@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/sor999/robot/services/worker/internal/repository"
 )
 
+// main은 lane별 저장 경로를 시작하고 오류 상태를 보존해 종료한다.
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
@@ -31,33 +33,20 @@ func main() {
 
 	shutdownDone := make(chan struct{})
 	defer close(shutdownDone)
-	go func() {
-		select {
-		case <-shutdownDone:
-			return
-		case <-ctx.Done():
-		}
-		timer := time.NewTimer(cfg.Telemetry.ShutdownTimeout)
-		defer timer.Stop()
-		select {
-		case <-shutdownDone:
-			return
-		case <-timer.C:
-			log.Print("[Main] shutdown deadline reached; uncommitted records will replay")
-			os.Exit(0)
-		}
-	}()
+	var failed atomic.Bool
+	go watchShutdown(ctx, shutdownDone, cfg.Telemetry.ShutdownTimeout, &failed, os.Exit)
+
 	metrics := observability.NewMetrics()
 	go func() {
 		log.Printf("[Metrics] Prometheus endpoint 시작 | address=%s", cfg.MetricsAddr)
 		if err := metrics.Serve(ctx, cfg.MetricsAddr); err != nil {
 			log.Printf("[Metrics] 서버 종료 오류: %v", err)
+			failed.Store(true)
 			cancel()
 		}
 	}()
 
 	var wg sync.WaitGroup
-	errors := make(chan error, 2)
 	for _, lane := range []struct {
 		name   string
 		limits kafkapkg.Limits
@@ -105,20 +94,37 @@ func main() {
 			defer wg.Done()
 			defer pool.Close()
 			if err := engine.Run(ctx); err != nil {
-				errors <- err
+				log.Printf("[Main] %v", err)
+				failed.Store(true)
 				cancel()
 			}
 		}()
 	}
 	wg.Wait()
-	close(errors)
-	failed := false
-	for err := range errors {
-		log.Printf("[Main] %v", err)
-		failed = true
-	}
-	if failed {
+	if failed.Load() {
 		os.Exit(1)
 	}
 	log.Println("[Main] Worker 정상 종료")
+}
+
+// watchShutdown은 전체 종료 기한을 보장하고 오류 종료 상태를 유지한다.
+func watchShutdown(ctx context.Context, done <-chan struct{}, timeout time.Duration, failed *atomic.Bool, exit func(int)) {
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+		log.Print("[Main] shutdown deadline reached; uncommitted records will replay")
+		code := 0
+		if failed.Load() {
+			code = 1
+		}
+		exit(code)
+	}
 }

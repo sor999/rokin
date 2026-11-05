@@ -12,9 +12,10 @@ import (
 )
 
 type fakeStore struct {
-	calls int
-	rows  int
-	err   error
+	calls   int
+	ackRows int
+	rows    int
+	err     error
 }
 
 func (s *fakeStore) BatchInsertPose(_ context.Context, r []repository.PoseRow) error {
@@ -24,7 +25,10 @@ func (s *fakeStore) BatchInsertPose(_ context.Context, r []repository.PoseRow) e
 }
 func (*fakeStore) BatchInsertBattery(context.Context, []repository.BatteryRow) error { return nil }
 func (*fakeStore) BatchInsertStatus(context.Context, []repository.StatusRow) error   { return nil }
-func (*fakeStore) BatchInsertAck(context.Context, []repository.AckRow) error         { return nil }
+func (s *fakeStore) BatchInsertAck(_ context.Context, rows []repository.AckRow) error {
+	s.ackRows += len(rows)
+	return nil
+}
 
 type fakeDLQ struct {
 	err   error
@@ -107,7 +111,7 @@ func TestInvalidIdentitiesRouteToDLQ(t *testing.T) {
 		d := &fakeDLQ{}
 		s := &fakeStore{}
 		h := New(s, d)
-		if err := h.Process(context.Background(), []kafka.Message{msg}); err != nil || d.calls != 1 || s.rows != 0 {
+		if err := h.Process(context.Background(), []kafka.Message{msg}); err != nil || d.calls != 1 || s.rows != 0 || s.ackRows != 0 {
 			t.Fatalf("malformed identity poisoned DB instead of DLQ: %v", err)
 		}
 	}
