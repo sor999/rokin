@@ -34,3 +34,9 @@ func TestParseAckMalformedPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestUUIDCaseCompatibility(t *testing.T) {
+	if !validUUID("ABCDEFAB-CDEF-4ABC-9ABC-ABCDEFABCDEF") {
+		t.Fatal("PostgreSQL-valid uppercase UUID rejected")
+	}
+}

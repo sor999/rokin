@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -13,7 +14,13 @@ import (
 
 // Metrics는 Worker 처리 경로의 Prometheus 지표를 관리한다.
 type Metrics struct {
+	pauseMu          sync.Mutex
+	lastPause        map[string]time.Time
+	pauseSeconds     *prometheus.CounterVec
+	lag              *prometheus.GaugeVec
 	registry         *prometheus.Registry
+	queue            *prometheus.GaugeVec
+	controls         *prometheus.CounterVec
 	messagesReceived *prometheus.CounterVec
 	batchFlushes     *prometheus.CounterVec
 	batchSize        *prometheus.HistogramVec
@@ -26,7 +33,12 @@ type Metrics struct {
 // NewMetrics는 독립 registry와 Worker 지표를 생성한다.
 func NewMetrics() *Metrics {
 	m := &Metrics{
-		registry: prometheus.NewRegistry(),
+		registry:     prometheus.NewRegistry(),
+		lastPause:    make(map[string]time.Time),
+		pauseSeconds: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "worker_partition_paused_seconds_total", Help: "Paused partition time"}, []string{"lane"}),
+		lag:          prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "worker_partition_lag", Help: "Fetched high watermark minus last committed position"}, []string{"topic", "partition"}),
+		queue:        prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "worker_pending", Help: "Pending reservations and paused partitions"}, []string{"lane", "kind"}),
+		controls:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "worker_control_total", Help: "Backpressure control events"}, []string{"lane", "event"}),
 		messagesReceived: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "worker",
@@ -90,6 +102,7 @@ func NewMetrics() *Metrics {
 	m.registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		m.queue, m.controls, m.pauseSeconds, m.lag,
 		m.messagesReceived,
 		m.batchFlushes,
 		m.batchSize,
@@ -171,4 +184,29 @@ func resultLabel(succeeded bool) string {
 		return "success"
 	}
 	return "failure"
+}
+
+// SetQueue는 lane의 예약 예산 사용량과 중지 시간을 기록한다.
+func (m *Metrics) SetQueue(lane string, count, bytes, paused int) {
+	m.pauseMu.Lock()
+	now := time.Now()
+	if last, ok := m.lastPause[lane]; ok {
+		m.pauseSeconds.WithLabelValues(lane).Add(now.Sub(last).Seconds() * float64(paused))
+	}
+	m.lastPause[lane] = now
+	m.pauseMu.Unlock()
+	m.queue.WithLabelValues(lane, "messages").Set(float64(count))
+	m.queue.WithLabelValues(lane, "reserved_bytes").Set(float64(bytes))
+	m.queue.WithLabelValues(lane, "paused_partitions").Set(float64(paused))
+}
+
+// ObserveControl은 lane별 재시도와 할당 변경 및 중지를 기록한다.
+func (m *Metrics) ObserveControl(lane, event string) { m.controls.WithLabelValues(lane, event).Inc() }
+
+// SetLag는 조회된 파티션 lag를 음수 없이 기록한다.
+func (m *Metrics) SetLag(topic, partition string, lag int64) {
+	if lag < 0 {
+		lag = 0
+	}
+	m.lag.WithLabelValues(topic, partition).Set(float64(lag))
 }
