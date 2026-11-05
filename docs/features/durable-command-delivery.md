@@ -121,7 +121,18 @@ command_ack_receipt의 SELECT, INSERT, UPDATE 권한을 추가해야 한다. 이
 발행은 API당 10개 상한과 1초 임대로 제한하며, 앞선 지연 전송이 정지 전송을 막지 않는지
 및 정지 5초 만료 전에 임대를 다시 맡을 수 있는지 검증했다.
 API도 ROS와 같은 16KiB 입력 상한을 적용해 전달 불가능한 명령의 접수를 차단한다.
-STOMP 검증 실패는 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다. cmdId는 null이다. STORAGE_UNAVAILABLE에서 접수 여부 조회는 영속 경로가 활성화되고 처음부터 idempotencyKey를 보낸 요청에만 가능하다. 키 없는 요청은 cmdId를 받지 못하면 조회할 수 없으며 자동으로 다시 보내지 않는다. 복구가 필요한 클라이언트는 첫 전송부터 idempotencyKey를 포함해야 한다. 레거시 전달 실패는 DELIVERY_UNCERTAIN으로 표시하며 조회 가능 여부를 가정하지 않는다.
+handleCommand에 정상 역직렬화된 요청이 도달한 뒤 발생하는 검증 예외는
+같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다.
+cmdId는 null이다. 메시지 역직렬화 자체가 실패하면 컨트롤러에 도달하지 않으므로
+요청 식별자가 포함된 rejected 응답을 보장하지 않는다.
+
+STORAGE_UNAVAILABLE에서 접수 여부 조회는 영속 경로가 활성화되고 처음부터
+idempotencyKey를 보낸 요청에만 가능하다. 키 없는 요청은 cmdId를 받지 못하면 조회할 수 없으며
+자동으로 다시 보내지 않는다. 복구가 필요한 클라이언트는 첫 전송부터 idempotencyKey를 포함해야 한다.
+
+레거시 경로의 동기 전달 예외만 DELIVERY_UNCERTAIN으로 표시한다. 비동기 Kafka 발행 실패는
+accepted 응답 후 발생할 수 있으며 서버 로그에만 남고 클라이언트에 후속 실패 응답을 보내지 않는다.
+레거시 명령에는 outbox 키 조회를 통한 복구를 보장하지 않는다.
 
 병합 전 리뷰 보완: 로봇은 SQLite 잠금 대기 후 현재 시각으로 만료를 검사하고,
 실행 의도 커밋 후 동작 적용 직전에 다시 검사한다. 대기 중 만료된 정지가 실행되지 않는지와
