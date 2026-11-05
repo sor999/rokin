@@ -69,9 +69,58 @@ ROS 강제 종료 후 이동 재개 방지, Worker 및 DB 중단 후 Ack 복구 
 100.115초에 통과했다. 테스트는 각 시나리오의 로봇 준비 상태를 확인한 후 시작한다.
 로봇 단위 19개, Bridge 44개 중 3개 별도 통합 생략, 화면 단위 31개 및 typecheck/build 통과.
 
-병합 전 리뷰 보완: 로봇은 SQLite 잠금 대기 후 현재 시각으로 만료를 검사하고,
-실행 의도 커밋 후 동작 적용 직전에 다시 검사한다. 대기 중 만료된 정지가 실행되지 않는지와
-중복 명령이 동작 없이 같은 결과만 반환하는지 회귀 테스트로 검증한다.
+## Kafka 3대 검증 구성
+
+```bash
+scripts/durability/kafka-lab.sh up
+scripts/durability/kafka-lab.sh test
+scripts/durability/kafka-lab.sh stop
+```
+
+별도 rokin-durable-lab 프로젝트와 Kafka 볼륨 3개를 사용한다. 호스트 포트는
+127.0.0.1의 29192, 29292, 29392이며 Kafka exporter는 29408, 복제 지표와 경보를 수집하는 Prometheus는 29490이다.
+Kafka 자체 KRaft quorum으로 메타데이터도 각 영속 볼륨에 보존한다.
+기존 개발용 단일 브로커를 3대 구성으로 자동 전환하지 않는다.
+
+토픽 초기화 환경: KAFKA_REPLICATION_FACTOR=3, KAFKA_MIN_INSYNC_REPLICAS=2.
+기존 RF가 다르면 중단한다. 운영 토픽은 신규 브로커를 추가하고 kafka-reassign-partitions로
+명시적 replica 목록을 확장한 뒤 --verify로 완료를 확인한다. 이어서 kafka-configs --alter로
+min.insync.replicas=2 및 unclean.leader.election.enable=false를 설정하고 검증한다.
+재배치 완료 전 ISR을 강제로 낮추거나 토픽을 삭제 및 재생성하지 않는다.
+
+검증은 고유 durability-test 접두사의 새 토픽만 사용한다. 리더 1대 중단 후 발행 성공,
+2대 중단 후 발행 실패 및 로컬 Ack 유지, 복구 후 같은 event_id 재전송을 검사한다.
+원본 유실 시나리오는 해당 전용 테스트 토픽의 레코드만 제거하고 로컬 사본으로 복구한다.
+브로커 전송 확인 후에도 로컬 사본이 남는 것을 단언한다. 최종 Worker DB 저장 확인은
+별도의 실제 API/Worker/ROS 통합 테스트와 PostgreSQL 테스트에서 검증한다.
+테스트 토픽과 볼륨을 자동 삭제하지 않는다.
+
+검증 기록: Kafka 3대의 원본 레코드 제거 및 재전송, 리더 장애와 quorum 손실 및 복구
+2개 시나리오가 46.432초에 통과했다. 운영 서버 배포나 장애 영역 분산은 수행하지 않았다.
+
+## 운영 관측
+
+- API: command_delivery{state}, command_oldest_pending_seconds, command_publish_total
+- ROS 보고: command_journal{kind}의 unconfirmedAcks, oldestAckAgeSeconds, diskBytes,
+  storageFailures와 retransmissions
+- Kafka exporter: ISR과 replica 수 비교, producer의 발행 실패
+
+API의 journal 지표는 마지막 정상 HTTP 보고값이다. ROS 프로세스 자체 종료는 타깃 및
+기존 runtime heartbeat와 함께 확인한다. 지표가 조용하다고 전달 완료로 해석하지 않는다.
+
+전환 시 Worker 전용 DB 역할을 사용하는 환경은 command_outbox의 SELECT와
+command_ack_receipt의 SELECT, INSERT, UPDATE 권한을 추가해야 한다. 이력과 Ack 상태 전이의
+기존 권한도 유지한다. Compose의 개발 계정 외 운영 역할에 권한을 자동 부여하지 않는다.
+
+## 최종 회귀 기록
+
+리뷰 반영 후 실제 통합 5개가 111.687초에 통과했다. API 재시작, 잘못된 요청 키의
+오류 응답, 접수 응답 유실, ROS 강제 종료, Worker와 DB 중단 및 복구를 포함한다.
+로봇 단위 21개, Bridge 44개 중 별도 환경 3개 생략, 화면 단위 32개와 typecheck/build 통과.
+기본 경로의 Kafka 타임아웃은 유지하고 outbox 전용 producer만 짧은 제한을 사용한다.
+발행은 API당 10개 상한과 1초 임대로 제한하며, 앞선 지연 전송이 정지 전송을 막지 않는지
+및 정지 5초 만료 전에 임대를 다시 맡을 수 있는지 검증했다.
+API도 ROS와 같은 16KiB 입력 상한을 적용해 전달 불가능한 명령의 접수를 차단한다.
 handleCommand에 정상 역직렬화된 요청이 도달한 뒤 발생하는 검증 예외는
 같은 /topic/cmd-result에 status=rejected, requestId와 robotId, errorCode 및 message를 반환한다.
 cmdId는 null이다. 메시지 역직렬화 자체가 실패하면 컨트롤러에 도달하지 않으므로
@@ -84,3 +133,7 @@ idempotencyKey를 보낸 요청에만 가능하다. 키 없는 요청은 cmdId�
 레거시 경로의 동기 전달 예외만 DELIVERY_UNCERTAIN으로 표시한다. 비동기 Kafka 발행 실패는
 accepted 응답 후 발생할 수 있으며 서버 로그에만 남고 클라이언트에 후속 실패 응답을 보내지 않는다.
 레거시 명령에는 outbox 키 조회를 통한 복구를 보장하지 않는다.
+
+병합 전 리뷰 보완: 로봇은 SQLite 잠금 대기 후 현재 시각으로 만료를 검사하고,
+실행 의도 커밋 후 동작 적용 직전에 다시 검사한다. 대기 중 만료된 정지가 실행되지 않는지와
+중복 명령이 동작 없이 같은 결과만 반환하는지 회귀 테스트로 검증한다.

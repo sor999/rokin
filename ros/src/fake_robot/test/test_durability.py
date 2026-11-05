@@ -86,6 +86,24 @@ class DeliveryJournalTest(unittest.TestCase):
         self.journal.reported(old_receipts)
         self.assertTrue(self.journal.receipts()[0]['outcomeUnknown'])
 
+    def test_delayed_move_cannot_restart_after_newer_stop(self):
+        old_move = self.command(seq=1)
+        newer_stop = self.command(seq=2, action='stop')
+        self.journal.enqueue(newer_stop); self.assertTrue(self.journal.begin(newer_stop)[0])
+        self.journal.record([CommandAck(newer_stop['cmd_id'], 'done', 'stopped')])
+        self.journal.enqueue(old_move)
+        apply, result = self.journal.begin(old_move)
+        self.assertFalse(apply); self.assertEqual('failed', result['status'])
+        self.assertIn('superseded', result['message'])
+
+    def test_unknown_execution_remains_counted_after_receipt_reporting(self):
+        cmd = self.command()
+        self.journal.enqueue(cmd); self.journal.begin(cmd)
+        self.journal.recover('default', 'robot_1')
+        self.journal.reported(self.journal.receipts())
+        self.journal.maximum = 1
+        with self.assertRaises(CapacityError): self.journal.enqueue(self.command(seq=2))
+
     def test_lock_wait_is_included_in_deadline_check(self):
         cmd = self.command(action='stop')
         cmd['expires_at'] = '1970-01-01T00:02:30+00:00'

@@ -1,6 +1,6 @@
 # ADR 0008: 명령과 Ack 영속 전달
 
-상태: API 및 ROS 경로 구현, 장애 검증 전 기본 비활성화
+상태: 영속 경로와 격리 장애 검증 구현, 운영 활성화 전 기본 비활성화
 
 ## 결정
 
@@ -31,3 +31,17 @@ COMMAND_DURABLE_ENABLED 기본 false. API, Worker, ROS와 화면의 연결 검�
 전환 시 명령 접수를 막고 진행 명령을 정리한다. API/Flyway를 먼저, Worker를 다음에 배치한다.
 기존 마이그레이션을 수정하거나 Flyway repair를 하지 않는다. 기존 명령의 보존은 소급 보장하지 않는다.
 README는 변경하지 않는다.
+
+## Kafka 복제
+
+별도 검증 클러스터는 KRaft broker/controller 3개와 각 영속 볼륨을 사용한다.
+명령과 Ack 및 DLQ는 RF=3, min.insync.replicas=2, unclean.leader.election.enable=false다.
+모든 관련 producer는 acks=all과 멱등 전송을 명시한다. 복제본 부족 시 가용성보다 보존을 우선한다.
+토픽 초기화는 기존 RF와 설정이 다르면 중단한다. 기존 토픽을 자동 삭제하거나 재생성하지 않는다.
+
+이 클러스터는 단일 개발 호스트의 검증용이다. 운영에서는 브로커 및 메타데이터 quorum을
+서로 다른 서버와 장애 영역에 배치한다. PostgreSQL 및 ROS 볼륨 전체의 동시 유실,
+호스트 장애 후 실행 서버 인계는 이번 보장 범위에 포함하지 않는다.
+
+만료 검사는 PostgreSQL의 UTC 시각과 ROS 호스트의 UTC 시각이 동기화되어 있다는 전제를 둔다.
+로봇 동작의 정지 완료 보장과 명령의 실행 시작 제한은 서로 다르다.

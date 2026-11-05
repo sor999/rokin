@@ -47,7 +47,11 @@ func NewConsumer(
 	}
 
 	dlq, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": broker,
+		"bootstrap.servers":            broker,
+		"enable.idempotence":           true,
+		"acks":                         "all",
+		"message.timeout.ms":           5000,
+		"queue.buffering.max.messages": 1000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("DLQ Producer 생성 실패: %w", err)

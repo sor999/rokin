@@ -8,6 +8,8 @@ import java.time.OffsetDateTime;
  * Kafka command ack 메시지.
  */
 public record AckMessageDto(
+        @JsonProperty("event_id") String eventId,
+        @JsonProperty("fleet_id") String fleetId,
         @JsonProperty("cmd_id")
         String cmdId,
         @JsonProperty("robot_id")

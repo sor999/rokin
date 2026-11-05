@@ -58,7 +58,7 @@ public class CommandOutboxRepository {
             case "expired" -> "received_at IS NULL AND expires_at<=clock_timestamp() AND attempts=0";
             default -> "outcome_unknown OR (received_at IS NULL AND expires_at<=clock_timestamp() AND attempts>0)";
         };
-        return jdbc.queryForObject("SELECT count(*) FROM command_outbox WHERE fleet_id=? AND ("+condition+")", Double.class, fleet);
+        return jdbc.queryForObject("SELECT count(*) FROM command_outbox WHERE fleet_id=? AND ("+condition+") AND NOT EXISTS(SELECT 1 FROM robot_ack_state a WHERE a.cmd_id=command_outbox.cmd_id AND a.status IN ('done','failed'))", Double.class, fleet);
     }
     public double oldest(String fleet) {
         return jdbc.queryForObject("SELECT COALESCE(EXTRACT(EPOCH FROM clock_timestamp()-MIN(created_at)),0) FROM command_outbox WHERE fleet_id=? AND received_at IS NULL",Double.class,fleet);

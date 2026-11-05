@@ -65,10 +65,13 @@ class DeliveryJournal:
                    if os.path.exists(self.path + suffix))
 
     def _capacity(self):
-        pending = self.db.execute("SELECT count(*) FROM inbox WHERE state='PENDING'").fetchone()[0]
-        unconfirmed = self.db.execute('SELECT count(DISTINCT cmd_id) FROM ack').fetchone()[0]
+        unresolved = self.db.execute("""SELECT count(*) FROM (
+            SELECT cmd_id FROM inbox WHERE state IN ('PENDING','UNKNOWN')
+            UNION SELECT cmd_id FROM execution WHERE state IN ('INTENT','STARTED','UNKNOWN')
+            UNION SELECT cmd_id FROM ack
+        )""").fetchone()[0]
         # Reserve 64 KiB per unresolved command for subsequent results and interruption records.
-        if pending + unconfirmed >= self.maximum or self.disk_bytes() + (pending + unconfirmed + 1) * 65536 > self.budget:
+        if unresolved >= self.maximum or self.disk_bytes() + (unresolved + 1) * 65536 > self.budget:
             raise CapacityError('Durable command journal capacity exceeded')
 
     def healthy(self):

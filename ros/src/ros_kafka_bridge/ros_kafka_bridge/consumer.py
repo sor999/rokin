@@ -24,7 +24,7 @@ class KafkaCommandConsumer:
             'enable.auto.commit': False,
             'enable.auto.offset.store': False,
         }
-        self._producer_config = {'bootstrap.servers': broker, 'enable.idempotence': True}
+        self._producer_config = {'bootstrap.servers': broker, 'enable.idempotence': True, 'acks': 'all'}
         self._topic = topic
         self._dlq_topic = dlq_topic
         self._on_message = on_message

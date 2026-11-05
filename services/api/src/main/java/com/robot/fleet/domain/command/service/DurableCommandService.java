@@ -67,7 +67,11 @@ public class DurableCommandService {
                 payload.put("cmd_id",id.toString()); payload.put("fleet_id",fleet); payload.put("robot_id",request.getRobotId());
                 payload.put("command",request.getCommand()); payload.put("data",request.getData()); payload.put("issued_by",request.getIssuedBy());
                 payload.put("timestamp",now.toString()); payload.put("expires_at",expiry.toString()); payload.put("command_sequence",sequence);
-                try { repository.save(id,fleet,request.getRobotId(),key,hash,mapper.writeValueAsString(payload),sequence,expiry); }
+                try {
+                    String json=mapper.writeValueAsString(payload);
+                    if(json.getBytes(StandardCharsets.UTF_8).length>16384) throw new IllegalArgumentException("명령 크기 상한 초과");
+                    repository.save(id,fleet,request.getRobotId(),key,hash,json,sequence,expiry);
+                }
                 catch (com.fasterxml.jackson.core.JsonProcessingException e) { throw new IllegalArgumentException("명령 직렬화 실패",e); }
                 return id.toString();
             });

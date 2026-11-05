@@ -15,6 +15,12 @@ class AckMessageDtoTest {
             .findAndAddModules()
             .build();
 
+    @Test void durableAckIdentityIsPreserved() throws Exception {
+        var message=objectMapper.readValue("{\"event_id\":\"00000000-0000-0000-0000-000000000041\",\"fleet_id\":\"default\",\"cmd_id\":\"cmd-1\",\"status\":\"done\"}",AckMessageDto.class);
+        assertThat(message.eventId()).isEqualTo("00000000-0000-0000-0000-000000000041");
+        assertThat(message.fleetId()).isEqualTo("default");
+    }
+
     @Test
     @DisplayName("Kafka ack 메시지를 DTO로 역직렬화한다.")
     void ackMessageDto_역직렬화_성공() throws Exception {

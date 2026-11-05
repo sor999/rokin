@@ -85,12 +85,25 @@ class DurableCommandPostgresTest {
         repo.received("default",id,"robot_1",false); repo.release(id,current);
         assertThat(repo.claim("default",UUID.randomUUID())).isEmpty();
     }
+    @Test void storageFailureRollsBackAllocatedSequenceAndAcceptance() {
+        jdbc.execute("CREATE FUNCTION reject_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test storage failure'; END $$");
+        jdbc.execute("CREATE TRIGGER fail_outbox BEFORE INSERT ON command_outbox FOR EACH ROW EXECUTE FUNCTION reject_outbox()");
+        assertThatThrownBy(()->service.accept(request(UUID.randomUUID().toString()))).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_sequence",Integer.class)).isZero();
+    }
     @Test void publisherCrashLeaseCanBeReclaimedBeforeStopExpires() throws Exception {
         UUID id=UUID.fromString(service.accept(request(UUID.randomUUID().toString())));
         assertThat(repo.claim("default",UUID.randomUUID())).hasSize(1);
         Thread.sleep(1200);
         assertThat(repo.claim("default",UUID.randomUUID())).extracting(CommandOutboxRepository.Entry::cmdId).containsExactly(id);
         assertThat(repo.now()).isBefore(repo.byId("default",id).orElseThrow().expiresAt());
+    }
+    @Test void oversizedPayloadCannotCreateAnUndeliverableCommand() {
+        var request=request(UUID.randomUUID().toString()); request.setIssuedBy("x".repeat(16384));
+        assertThatThrownBy(()->service.accept(request)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM command_sequence",Integer.class)).isZero();
     }
     @Test void expiryDoesNotFabricateRobotAck() {
         UUID id=UUID.fromString(service.accept(request(UUID.randomUUID().toString())));

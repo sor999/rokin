@@ -65,6 +65,23 @@ class CommandDurabilityIntegrationTest(unittest.TestCase):
         code="import sqlite3,json; db=sqlite3.connect('/var/lib/robot-delivery/journal.sqlite3'); print(json.dumps(db.execute('SELECT state,unknown FROM execution WHERE cmd_id=?',("+repr(cmd)+",)).fetchone()))"
         return json.loads(subprocess.check_output(['docker','exec','rokin-scale-lab-fake_robot-1','python3','-c',code],text=True))
 
+    def test_api_restart_preserves_accepted_command(self):
+        key=self.send()
+        self.wait(lambda:self.lookup(key) is not None)
+        cmd=self.lookup(key)['cmdId']
+        self.docker('restart','--time','5','rokin-scale-lab-api-1')
+        self.wait(lambda:request('http://localhost:18081/api/commands/'+cmd).get('deliveryStatus')=='COMPLETED',60)
+        self.assertEqual(cmd,self.lookup(key)['cmdId'])
+
+    def test_invalid_request_key_returns_correlated_rejection(self):
+        correlation=str(uuid.uuid4())
+        self.client.send('SEND',{'destination':'/app/command','content-type':'application/json'},json.dumps({
+            'requestId':correlation,'idempotencyKey':'invalid','robotId':'robot_1','command':'stop','data':{}}))
+        self.wait(lambda:correlation in self.client.results)
+        result=self.client.results[correlation][0]
+        self.assertEqual('rejected',result['status']); self.assertEqual('INVALID_REQUEST',result['errorCode'])
+        self.assertIsNone(result['cmdId'])
+
     def test_response_loss_and_duplicate_request_recover_same_command(self):
         key=self.send()
         self.wait(lambda:self.lookup(key) is not None)
