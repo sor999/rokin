@@ -14,6 +14,8 @@ import (
 // Metrics는 Worker 처리 경로의 Prometheus 지표를 관리한다.
 type Metrics struct {
 	registry         *prometheus.Registry
+	queue            *prometheus.GaugeVec
+	controls         *prometheus.CounterVec
 	messagesReceived *prometheus.CounterVec
 	batchFlushes     *prometheus.CounterVec
 	batchSize        *prometheus.HistogramVec
@@ -27,6 +29,8 @@ type Metrics struct {
 func NewMetrics() *Metrics {
 	m := &Metrics{
 		registry: prometheus.NewRegistry(),
+		queue:    prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "worker_pending", Help: "Pending reservations and paused partitions"}, []string{"lane", "kind"}),
+		controls: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "worker_control_total", Help: "Backpressure control events"}, []string{"lane", "event"}),
 		messagesReceived: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "worker",
@@ -90,6 +94,7 @@ func NewMetrics() *Metrics {
 	m.registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		m.queue, m.controls,
 		m.messagesReceived,
 		m.batchFlushes,
 		m.batchSize,
@@ -172,3 +177,10 @@ func resultLabel(succeeded bool) string {
 	}
 	return "failure"
 }
+
+func (m *Metrics) SetQueue(lane string, count, bytes, paused int) {
+	m.queue.WithLabelValues(lane, "messages").Set(float64(count))
+	m.queue.WithLabelValues(lane, "reserved_bytes").Set(float64(bytes))
+	m.queue.WithLabelValues(lane, "paused_partitions").Set(float64(paused))
+}
+func (m *Metrics) ObserveControl(lane, event string) { m.controls.WithLabelValues(lane, event).Inc() }

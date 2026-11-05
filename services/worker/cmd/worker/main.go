@@ -5,7 +5,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -27,6 +29,24 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	shutdownDone := make(chan struct{})
+	defer close(shutdownDone)
+	go func() {
+		select {
+		case <-shutdownDone:
+			return
+		case <-ctx.Done():
+		}
+		timer := time.NewTimer(cfg.Telemetry.ShutdownTimeout)
+		defer timer.Stop()
+		select {
+		case <-shutdownDone:
+			return
+		case <-timer.C:
+			log.Print("[Main] shutdown deadline reached; uncommitted records will replay")
+			os.Exit(0)
+		}
+	}()
 	metrics := observability.NewMetrics()
 	go func() {
 		log.Printf("[Metrics] Prometheus endpoint 시작 | address=%s", cfg.MetricsAddr)
@@ -36,52 +56,69 @@ func main() {
 		}
 	}()
 
-	// DB 연결 풀 초기화
-	pool, err := pgxpool.New(ctx, cfg.DBDSN)
-	if err != nil {
-		log.Fatalf("DB 연결 실패: %v", err)
-	}
-	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("DB Ping 실패: %v", err)
-	}
-	log.Println("[Main] DB 연결 성공")
-
-	repo := repository.New(pool)
-	if err := repository.CheckSchema(ctx, pool); err != nil {
-		log.Fatalf("DB 스키마 확인 실패: %v", err)
-	}
-	if os.Getenv("COMMAND_DURABLE_ENABLED") == "true" {
-		if _, err := pool.Exec(ctx, "SELECT event_id, cmd_id FROM command_ack_receipt LIMIT 0"); err != nil {
-			log.Fatalf("영속 전달 Flyway 스키마 확인 실패: %v", err)
+	var wg sync.WaitGroup
+	errors := make(chan error, 2)
+	for _, lane := range []struct {
+		name   string
+		limits kafkapkg.Limits
+		ack    bool
+	}{
+		{"telemetry", cfg.Telemetry, false}, {"ack", cfg.Ack, true},
+	} {
+		var topics []string
+		for _, topic := range cfg.KafkaTopics {
+			if (topic == "ack.robot") == lane.ack {
+				topics = append(topics, topic)
+			}
 		}
+		if len(topics) == 0 {
+			continue
+		}
+		poolCfg, err := pgxpool.ParseConfig(cfg.DBDSN)
+		if err != nil {
+			log.Fatal(err)
+		}
+		poolCfg.MaxConns = int32(lane.limits.Concurrency)
+		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err = repository.CheckSchema(ctx, pool); err != nil {
+			pool.Close()
+			log.Fatalf("Flyway schema: %v", err)
+		}
+		if os.Getenv("COMMAND_DURABLE_ENABLED") == "true" {
+			if _, err = pool.Exec(ctx, "SELECT event_id, cmd_id FROM command_ack_receipt LIMIT 0"); err != nil {
+				pool.Close()
+				log.Fatal(err)
+			}
+		}
+		consumer, err := kafkapkg.NewConsumer(cfg.KafkaBroker, cfg.KafkaGroupID, topics, cfg.DLQTopic, metrics, lane.limits)
+		if err != nil {
+			pool.Close()
+			log.Fatal(err)
+		}
+		h := handler.New(repository.New(pool), consumer)
+		engine := kafkapkg.NewEngine(consumer, lane.limits, h.Process, kafkapkg.MetricsAdapter{Metrics: metrics}, lane.name)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer pool.Close()
+			if err := engine.Run(ctx); err != nil {
+				errors <- err
+				cancel()
+			}
+		}()
 	}
-	log.Println("[Main] Flyway 스키마 확인 완료")
-
-	// Kafka Consumer 초기화
-	consumer, err := kafkapkg.NewConsumer(
-		cfg.KafkaBroker,
-		cfg.KafkaGroupID,
-		cfg.KafkaTopics,
-		cfg.DLQTopic,
-		metrics,
-	)
-	if err != nil {
-		log.Fatalf("Kafka Consumer 초기화 실패: %v", err)
+	wg.Wait()
+	close(errors)
+	failed := false
+	for err := range errors {
+		log.Printf("[Main] %v", err)
+		failed = true
 	}
-	log.Printf("[Main] Kafka Consumer 시작 | broker=%s | topics=%v", cfg.KafkaBroker, cfg.KafkaTopics)
-
-	// Kafka → 핸들러 메시지 채널
-	msgCh := make(chan kafkapkg.Message, 5000)
-
-	// Kafka Consumer 고루틴
-	go consumer.Run(ctx, msgCh)
-
-	// 핸들러 (배치 누적 + DB 플러시) 고루틴 기동
-	h := handler.New(repo, consumer, cfg.BatchSize, cfg.BatchFlushMs, metrics)
-	log.Printf("[Main] Worker 시작 | batchSize=%d | flushMs=%d", cfg.BatchSize, cfg.BatchFlushMs)
-	h.Run(ctx, msgCh)
-
+	if failed {
+		os.Exit(1)
+	}
 	log.Println("[Main] Worker 정상 종료")
 }

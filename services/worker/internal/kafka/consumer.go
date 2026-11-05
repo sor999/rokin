@@ -5,144 +5,182 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	ck "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/sor999/robot/services/worker/internal/observability"
 )
 
-// Message는 Kafka에서 읽은 메시지와 오프셋 정보를 포함한다.
 type Message struct {
 	Topic     string
 	Payload   []byte
 	Partition int32
 	Offset    int64
 }
-
-// Consumer는 여러 토픽을 구독하는 Kafka Consumer 래퍼다.
 type Consumer struct {
-	kc       *kafka.Consumer
-	dlq      *kafka.Producer
-	dlqTopic string
-	metrics  *observability.Metrics
+	kc           *ck.Consumer
+	dlq          *ck.Producer
+	dlqTopic     string
+	metrics      *observability.Metrics
+	messageBytes int
 }
 
-func NewConsumer(
-	broker,
-	groupID string,
-	topics []string,
-	dlqTopic string,
-	metrics *observability.Metrics,
-) (*Consumer, error) {
-	kc, err := kafka.NewConsumer(&kafka.ConfigMap{
-		"bootstrap.servers":  broker,
-		"group.id":           groupID,
-		"auto.offset.reset":  "latest",
-		"enable.auto.commit": false, // 수동 커밋 사용
+func NewConsumer(broker, groupID string, topics []string, dlqTopic string, metrics *observability.Metrics, limits Limits) (*Consumer, error) {
+	kc, err := ck.NewConsumer(&ck.ConfigMap{
+		"bootstrap.servers": broker, "group.id": groupID,
+		"auto.offset.reset": "error", "enable.auto.commit": false, "enable.auto.offset.store": false,
+		"go.application.rebalance.enable": true, "partition.assignment.strategy": "range",
+		"queued.max.messages.kbytes": limits.NativeQueueKiB,
+		"fetch.message.max.bytes":    limits.MessageBytes, "fetch.max.bytes": limits.NativeQueueKiB * 1024,
+		"socket.timeout.ms": 3000, "session.timeout.ms": 10000,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Kafka Consumer 생성 실패: %w", err)
+		return nil, err
 	}
-	if err := kc.SubscribeTopics(topics, nil); err != nil {
-		return nil, fmt.Errorf("토픽 구독 실패: %w", err)
-	}
-
-	dlq, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers":            broker,
-		"enable.idempotence":           true,
-		"acks":                         "all",
-		"message.timeout.ms":           5000,
-		"queue.buffering.max.messages": 1000,
+	dlq, err := ck.NewProducer(&ck.ConfigMap{
+		"bootstrap.servers": broker, "enable.idempotence": true, "acks": "all", "message.timeout.ms": 5000,
+		"queue.buffering.max.messages": limits.Concurrency, "queue.buffering.max.kbytes": limits.Concurrency * limits.MessageBytes * 8 / 1024,
+		"message.max.bytes": limits.MessageBytes,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("DLQ Producer 생성 실패: %w", err)
+		kc.Close()
+		return nil, err
 	}
-
-	return &Consumer{kc: kc, dlq: dlq, dlqTopic: dlqTopic, metrics: metrics}, nil
+	if err = kc.SubscribeTopics(topics, nil); err != nil {
+		kc.Close()
+		dlq.Close()
+		return nil, err
+	}
+	return &Consumer{kc: kc, dlq: dlq, dlqTopic: dlqTopic, metrics: metrics, messageBytes: limits.MessageBytes}, nil
 }
 
-// Run은 Kafka 메시지를 읽어 ch 채널로 전달한다. ctx 취소 시 정상 종료한다.
-func (c *Consumer) Run(ctx context.Context, ch chan<- Message) {
-	defer c.kc.Close()
-	defer c.dlq.Flush(3000)
-	defer c.dlq.Close()
+func partitions(ps []ck.TopicPartition) []Partition {
+	out := make([]Partition, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, Partition{*p.Topic, p.Partition})
+	}
+	return out
+}
+func topicPartition(p Partition) ck.TopicPartition {
+	return ck.TopicPartition{Topic: &p.Topic, Partition: p.ID}
+}
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("[Consumer] 종료 신호 수신, 컨슈머 종료")
-			return
-		default:
+func (c *Consumer) Poll(ms int) Event {
+	switch ev := c.kc.Poll(ms).(type) {
+	case *ck.Message:
+		c.metrics.ObserveMessage(*ev.TopicPartition.Topic)
+		return Event{Message: &Message{*ev.TopicPartition.Topic, ev.Value, ev.TopicPartition.Partition, int64(ev.TopicPartition.Offset)}}
+	case ck.AssignedPartitions:
+		return Event{Assigned: partitions(ev.Partitions)}
+	case ck.RevokedPartitions:
+		return Event{Revoked: partitions(ev.Partitions)}
+	case ck.Error:
+		if ev.Code() == ck.ErrOffsetOutOfRange || ev.Code() == ck.ErrAutoOffsetReset || ev.IsFatal() {
+			return Event{Err: ev}
 		}
+		log.Printf("[Kafka] %v", ev)
+	}
+	return Event{}
+}
 
-		ev := c.kc.Poll(200)
-		if ev == nil {
-			continue
+func (c *Consumer) Assign(keys []Partition) error {
+	ps := make([]ck.TopicPartition, 0, len(keys))
+	for _, key := range keys {
+		ps = append(ps, topicPartition(key))
+	}
+	committed, err := c.kc.Committed(ps, 3000)
+	if err != nil {
+		return err
+	}
+	for i, p := range committed {
+		if p.Error != nil {
+			return p.Error
 		}
-
-		switch msg := ev.(type) {
-		case *kafka.Message:
-			c.metrics.ObserveMessage(*msg.TopicPartition.Topic)
-			ch <- Message{
-				Topic:     *msg.TopicPartition.Topic,
-				Payload:   msg.Value,
-				Partition: msg.TopicPartition.Partition,
-				Offset:    int64(msg.TopicPartition.Offset),
+		low, high, err := c.kc.QueryWatermarkOffsets(*p.Topic, p.Partition, 3000)
+		if err != nil {
+			return err
+		}
+		offset := int64(p.Offset)
+		if p.Offset == ck.OffsetInvalid {
+			offset = low
+		} else if offset < low || offset > high {
+			return fmt.Errorf("retained offset missing topic=%s partition=%d committed=%d range=[%d,%d]", *p.Topic, p.Partition, offset, low, high)
+		}
+		ps[i].Offset = ck.Offset(offset)
+	}
+	return c.kc.Assign(ps)
+}
+func (c *Consumer) Unassign() error { return c.kc.Unassign() }
+func (c *Consumer) Pause(p Partition, paused bool) error {
+	ps := []ck.TopicPartition{topicPartition(p)}
+	if paused {
+		return c.kc.Pause(ps)
+	}
+	return c.kc.Resume(ps)
+}
+func (c *Consumer) Seek(msg Message) error {
+	p := topicPartition(Partition{msg.Topic, msg.Partition})
+	p.Offset = ck.Offset(msg.Offset)
+	return c.kc.Seek(p, 3000)
+}
+func (c *Consumer) Commit(p Partition, offset int64) error {
+	tp := topicPartition(p)
+	tp.Offset = ck.Offset(offset)
+	result, err := c.kc.CommitOffsets([]ck.TopicPartition{tp})
+	if err == nil {
+		for _, r := range result {
+			if r.Error != nil {
+				err = r.Error
+				break
 			}
-		case kafka.Error:
-			log.Printf("[Consumer] Kafka 오류: %v", msg)
 		}
 	}
-}
-
-// Commit은 특정 메시지의 오프셋을 커밋한다.
-func (c *Consumer) Commit(topic string, partition int32, offset int64) error {
-	_, err := c.kc.CommitOffsets([]kafka.TopicPartition{
-		{
-			Topic:     &topic,
-			Partition: partition,
-			Offset:    kafka.Offset(offset + 1), // 다음 읽을 위치
-		},
-	})
-	c.metrics.ObserveOffsetCommit(topic, err == nil)
+	c.metrics.ObserveOffsetCommit(p.Topic, err == nil)
 	return err
 }
+func (c *Consumer) Close() { c.kc.Close(); c.dlq.Close() }
 
-// SendToDLQ는 처리 실패한 메시지를 DLQ 토픽으로 전달한다.
-// DLQ broker가 수신을 확인한 경우에만 nil을 반환한다.
-func (c *Consumer) SendToDLQ(originalTopic string, payload []byte, reason string) error {
-	succeeded := false
-	defer func() {
-		c.metrics.ObserveDLQPublish(originalTopic, succeeded)
-	}()
-
-	envelope := map[string]any{
-		"original_topic": originalTopic,
-		"payload":        string(payload),
-		"reason":         reason,
-	}
-	value, _ := json.Marshal(envelope)
-
-	deliveryCh := make(chan kafka.Event, 1)
-	defer close(deliveryCh)
-
-	err := c.dlq.Produce(&kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &c.dlqTopic, Partition: kafka.PartitionAny},
-		Value:          value,
-	}, deliveryCh)
+// SendToDLQ는 전달 확인까지만 기다린다. 취소 후에도 delivery 채널은 producer가 소유한다.
+func (c *Consumer) SendToDLQ(ctx context.Context, topic string, payload []byte, reason string) (err error) {
+	defer func() { c.metrics.ObserveDLQPublish(topic, err == nil) }()
+	value, err := json.Marshal(map[string]any{"original_topic": topic, "payload": string(payload), "reason": reason})
 	if err != nil {
-		return fmt.Errorf("DLQ 발행 실패: %w", err)
+		return err
 	}
+	if len(value) > c.messageBytes {
+		return &PermanentError{"DLQ envelope exceeds message limit"}
+	}
+	delivery := make(chan ck.Event, 1)
+	if err = c.dlq.Produce(&ck.Message{TopicPartition: ck.TopicPartition{Topic: &c.dlqTopic, Partition: ck.PartitionAny}, Value: value}, delivery); err != nil {
+		if ke, ok := err.(ck.Error); ok && ke.Code() == ck.ErrMsgSizeTooLarge {
+			return &PermanentError{err.Error()}
+		}
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ev := <-delivery:
+		msg, ok := ev.(*ck.Message)
+		if !ok {
+			return fmt.Errorf("unexpected DLQ event %T", ev)
+		}
+		if ke, ok := msg.TopicPartition.Error.(ck.Error); ok && ke.Code() == ck.ErrMsgSizeTooLarge {
+			return &PermanentError{ke.Error()}
+		}
+		return msg.TopicPartition.Error
+	}
+}
 
-	event := <-deliveryCh
-	msg, ok := event.(*kafka.Message)
-	if !ok {
-		return fmt.Errorf("DLQ delivery event 타입 오류: %T", event)
-	}
-	if msg.TopicPartition.Error != nil {
-		return fmt.Errorf("DLQ delivery 실패: %w", msg.TopicPartition.Error)
-	}
+// MetricsAdapter는 스케줄러의 예약량과 실행 결과를 수집한다.
+type MetricsAdapter struct{ Metrics *observability.Metrics }
 
-	succeeded = true
-	log.Printf("[DLQ] 발행 완료 | topic=%s", c.dlqTopic)
-	return nil
+func (a MetricsAdapter) Queue(lane string, count, bytes, paused int) {
+	a.Metrics.SetQueue(lane, count, bytes, paused)
+}
+func (a MetricsAdapter) Retry(lane string)     { a.Metrics.ObserveControl(lane, "retry") }
+func (a MetricsAdapter) Rebalance(lane string) { a.Metrics.ObserveControl(lane, "rebalance") }
+func (a MetricsAdapter) Blocked(lane string)   { a.Metrics.ObserveControl(lane, "blocked") }
+func (a MetricsAdapter) Batch(topic string, size int, duration time.Duration, ok bool) {
+	a.Metrics.ObserveBatch(topic, size, duration, ok)
 }
