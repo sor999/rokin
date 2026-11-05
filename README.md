@@ -16,30 +16,80 @@ ROS2 기반 가상 로봇이 텔레메트리를 발행하면 Kafka를 통해 Go 
 
 ## 아키텍처
 
-```text
-ROS2 fake_robot
-  -> ros_kafka_bridge
-  -> Kafka (telemetry.*, ack.robot, cmd.robot)
-  -> Go Worker -> PostgreSQL
-  -> Spring Boot API
-  -> Next.js Dashboard
+Kafka를 중심으로 이력 저장과 실시간 전달을 분리합니다. PostgreSQL은 이력과 공유 상태를
+저장하고, Redis는 API 인스턴스 사이에서 실시간 이벤트를 전달합니다.
 
-Dashboard command
-  -> Spring WebSocket/STOMP
-  -> Kafka cmd.robot
-  -> ros_kafka_bridge
-  -> ROS2 robot
-  -> ack.robot
-  -> Spring API / Dashboard
+```mermaid
+flowchart LR
+    subgraph ROS["ROS2 관리 런타임"]
+        Robot["가상 로봇"]
+        Bridge["ROS Kafka Bridge"]
+        Robot -->|"텔레메트리와 Ack"| Bridge
+        Bridge -->|"이동 및 정지 명령"| Robot
+    end
+
+    subgraph Kafka["Kafka"]
+        Telemetry["telemetry.pose / battery / status"]
+        Ack["ack.robot"]
+        Command["cmd.robot"]
+    end
+
+    subgraph Backend["서버"]
+        subgraph Worker["Go Worker 프로세스"]
+            TelemetryWorker["텔레메트리 처리"]
+            AckWorker["Ack 처리"]
+        end
+        API["Spring Boot API 인스턴스"]
+        Redis[("Redis Pub/Sub")]
+        DB[("PostgreSQL")]
+    end
+
+    Dashboard["Next.js Dashboard"]
+
+    Bridge --> Telemetry
+    Bridge --> Ack
+    Command --> Bridge
+    Telemetry --> TelemetryWorker
+    Ack --> AckWorker
+    TelemetryWorker -->|"이력 및 최신 상태 저장"| DB
+    AckWorker -->|"Ack 상태 저장"| DB
+    Telemetry --> API
+    Ack --> API
+    API <-->|"Fleet 이벤트 공유"| Redis
+    API <-->|"조회 및 등록, 공유 상태"| DB
+    Dashboard -->|"REST 요청 및 STOMP 명령"| API
+    API -->|"REST 응답, SSE 및 STOMP Ack"| Dashboard
+    API -->|"명령 발행"| Command
 ```
 
 ### 데이터 흐름
 
-1. `fake_robot`가 `/fleet/{robot_id}` 토픽으로 pose, battery, status, ack를 발행합니다.
-2. `ros_kafka_bridge`가 ROS2 메시지를 Kafka 토픽(`telemetry.pose`, `telemetry.battery`, `telemetry.status`, `ack.robot`)으로 전달합니다.
-3. `worker`가 Kafka를 consume해서 PostgreSQL에 배치 적재합니다.
-4. `api`가 DB 조회용 REST API를 제공하고, Kafka 이벤트를 받아 SSE/WebSocket으로 클라이언트에 브로드캐스트합니다.
-5. `dashboard`가 REST로 초기 상태를 불러오고, SSE와 STOMP로 실시간 상태 및 Ack를 반영합니다.
+1. **수집과 저장:** 로봇의 pose, battery, status와 Ack를 Bridge가 Kafka에 전달합니다.
+   Worker는 텔레메트리와 Ack를 별도 Consumer 및 DB 풀로 처리하고, PostgreSQL에
+   중복 없이 적재합니다. DB 장애로 대기 상한에 도달하면 소비를 멈추고 복구 후 재개합니다.
+2. **실시간 관제:** API가 Kafka 이벤트를 받아 Redis의 Fleet 채널로 공유합니다.
+   각 API는 자신에게 연결된 화면에 SSE로 텔레메트리를, STOMP로 Ack를 전달합니다.
+   화면은 REST로 초기 상태와 저장된 이력을 조회합니다.
+3. **로봇 제어:** 화면의 STOMP 명령은 API에서 검증한 뒤 `cmd.robot`을 통해 Bridge와
+   로봇으로 전달됩니다. 로봇의 실행 결과는 `ack.robot`을 거쳐 저장되고 화면에 반영됩니다.
+   명령 접수 응답과 로봇의 실행 완료 Ack는 구분합니다.
+4. **로봇 추가와 삭제:** 화면이 API의 등록 목록을 변경하면 ROS 관리 노드가 내부 API를
+   조회해 로봇과 Bridge 연결을 추가하거나 제거합니다. Fleet당 관리 런타임은 하나이며,
+   재시작하면 DB에 저장된 설정으로 복구합니다.
+
+### 영속 전달과 확장 경계
+
+- API 인스턴스는 PostgreSQL의 공유 상태와 Redis 이벤트 전달을 사용해 연결 서버에
+  관계없이 로봇 상태를 조회하고 실시간 이벤트를 받을 수 있습니다.
+- Worker를 늘리면 같은 consumer group 안에서 Kafka 파티션을 나눠 처리합니다.
+  파티션별 순서를 유지하며, 저장이 끝난 위치만 커밋하고 재할당 후 미완료 메시지를 재처리합니다.
+- 선택적인 명령 영속 경로를 켜면 PostgreSQL outbox와 ROS의 SQLite 저널로 명령 및 Ack를
+  보관하고 재전송합니다. **기본 설정은 비활성화**입니다.
+
+상세 구조는 [ARCHITECTURE.md](ARCHITECTURE.md), 메시지 계약은
+[Telemetry 도메인](docs/domain/telemetry.md), 설계 결정은 [ADR](docs/decisions/)에서 확인할 수 있습니다.
+[명령 영속 전달](docs/features/durable-command-delivery.md)과
+[Worker 부하 제어](docs/features/worker-backpressure.md)에 장애 복구 범위와 검증 결과를 기록했습니다.
 
 ## 패키지 구조
 
@@ -64,7 +114,7 @@ Dashboard command
 | API | `services/api/` | REST, SSE, WebSocket, Kafka integration | Spring Boot 3.5, Java 25 |
 | Worker | `services/worker/` | Kafka consume, PostgreSQL batch insert, DLQ 처리 | Go 1.22, pgx, confluent-kafka-go |
 | Dashboard | `services/dashboard/` | 실시간 관제 UI, 로봇 상세, 명령 패널 | Next.js 16, React 19, Zustand |
-| Infra | `infra/` | PostgreSQL, Kafka, Zookeeper, fake robot 컨테이너 | Docker Compose |
+| Infra | `infra/` | PostgreSQL, Redis, Kafka, Zookeeper, fake robot 컨테이너 | Docker Compose |
 
 ## 실행 방법
 
