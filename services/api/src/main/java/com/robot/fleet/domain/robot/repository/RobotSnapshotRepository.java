@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -53,7 +54,7 @@ public class RobotSnapshotRepository {
                 LEFT JOIN robot_presence p ON p.fleet_id=? AND p.robot_id=r.robot_id AND p.runtime_id=COALESCE(r.runtime_id,'')
                 ORDER BY r.robot_id
                 """;
-        var arguments = new java.util.ArrayList<Object>(List.of(fleet, fleet, after));
+        var arguments = new ArrayList<Object>(List.of(fleet, fleet, after));
         if (robotId != null) arguments.add(robotId);
         arguments.add(limit == null ? Integer.MAX_VALUE : limit);
         arguments.add(ttl); arguments.add(fleet);

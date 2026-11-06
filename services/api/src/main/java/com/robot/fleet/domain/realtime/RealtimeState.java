@@ -7,6 +7,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 @Component
 public class RealtimeState {
@@ -44,7 +45,7 @@ public class RealtimeState {
     }
 
     public synchronized void cleanup(Runnable action) { action.run(); }
-    public synchronized <T> T whenAvailable(java.util.function.Supplier<T> action) {
+    public synchronized <T> T whenAvailable(Supplier<T> action) {
         requireAvailable();
         return action.get();
     }

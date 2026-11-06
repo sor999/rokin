@@ -3,11 +3,14 @@ package com.robot.fleet.domain.ack.listener;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.domain.ack.dto.AckDto;
 import com.robot.fleet.domain.ack.dto.AckMessageDto;
+import com.robot.fleet.domain.realtime.RealtimePublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
-import com.robot.fleet.domain.realtime.RealtimePublisher;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -22,9 +25,9 @@ public class RobotAckKafkaListener {
         AckDto ack;
         try {
             AckMessageDto message = objectMapper.readValue(payload, AckMessageDto.class);
-            java.util.UUID.fromString(message.cmdId());
+            UUID.fromString(message.cmdId());
             if (message.robotId() == null || !message.robotId().matches("[A-Za-z][A-Za-z0-9_-]{0,127}") || message.occurredAt() == null
-                    || message.status() == null || !java.util.List.of("accepted", "done", "failed").contains(message.status())) throw new IllegalArgumentException("Invalid ack");
+                    || message.status() == null || !List.of("accepted", "done", "failed").contains(message.status())) throw new IllegalArgumentException("Invalid ack");
             ack = AckDto.of(
                     message.cmdId(),
                     message.robotId(),

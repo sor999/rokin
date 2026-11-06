@@ -1,6 +1,7 @@
 package com.robot.fleet.domain.realtime;
 
 import com.robot.fleet.domain.ack.dto.AckDto;
+import com.robot.fleet.domain.presence.service.PresenceService;
 import com.robot.fleet.domain.telemetry.dto.TelemetryEvent;
 import com.robot.fleet.domain.telemetry.service.TelemetryStreamService;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Component;
 public class LocalRealtimePublisher implements RealtimePublisher {
     private final TelemetryStreamService stream;
     private final SimpMessagingTemplate messaging;
-    private final com.robot.fleet.domain.presence.service.PresenceService presence;
+    private final PresenceService presence;
 
     public void telemetry(String eventId, TelemetryEvent event) {
         if (presence.online(event.robotId(), event.runtimeId())) stream.broadcast(event);

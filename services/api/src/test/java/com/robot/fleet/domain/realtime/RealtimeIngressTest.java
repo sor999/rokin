@@ -1,9 +1,13 @@
 package com.robot.fleet.domain.realtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.robot.fleet.domain.presence.service.PresenceService;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import com.robot.fleet.domain.telemetry.listener.TelemetryKafkaListener;
 import org.junit.jupiter.api.*;
+
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -14,7 +18,7 @@ class RealtimeIngressTest {
         var publisher = mock(RealtimePublisher.class);
         var simulations = mock(SimulationService.class);
         when(simulations.acceptsTelemetry("robot_1", null)).thenReturn(true);
-        var presence = mock(com.robot.fleet.domain.presence.service.PresenceService.class);
+        var presence = mock(PresenceService.class);
         var listener = new TelemetryKafkaListener(publisher, new ObjectMapper().findAndRegisterModules(), presence);
         String json = "{\"event_id\":\"0b181550-d9e4-4a66-8e0b-360d71dbece4\",\"robot_id\":\"robot_1\",\"timestamp\":\"2026-11-02T00:00:00Z\",\"data\":{\"x\":1,\"y\":2}}";
         when(presence.observe(any())).thenReturn(true);
@@ -32,9 +36,9 @@ class RealtimeIngressTest {
         var mapper = new ObjectMapper().findAndRegisterModules();
         var simulations = mock(SimulationService.class);
         when(simulations.acceptsTelemetry("robot_1", null)).thenReturn(true);
-        var listener = new TelemetryKafkaListener(publisher, mapper, mock(com.robot.fleet.domain.presence.service.PresenceService.class));
+        var listener = new TelemetryKafkaListener(publisher, mapper, mock(PresenceService.class));
         var json = mapper.createObjectNode();
-        json.put("event_id", java.util.UUID.randomUUID().toString());
+        json.put("event_id", UUID.randomUUID().toString());
         json.put("robot_id", "robot_1");
         json.put("timestamp", "2026-11-02T00:00:00Z");
         json.putObject("data").put("state", "x".repeat(RealtimeValidation.MAX_STATE_LENGTH + 1));

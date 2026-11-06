@@ -7,12 +7,15 @@
 
 - **Framework**: Spring Boot 3.5.x
 - **Language**: Java 25 (Eclipse Temurin)
-- **Database**: PostgreSQL 15, Spring Data JPA, Flyway (DB 마이그레이션)
+- **Database**: PostgreSQL 15, Spring Data JPA, JdbcTemplate, Flyway (DB 마이그레이션)
 - **Message Broker**: Apache Kafka 7.4.x
 - **Real-time Communication**: 
   - Server-Sent Events (SSE) - 단방향 텔레메트리 스트리밍
   - WebSocket (STOMP) - 양방향 로봇 제어 명령 및 수신
 - **API Documentation**: Swagger (springdoc-openapi)
+
+JPA와 JDBC의 사용 위치, 트랜잭션 공유 및 JDBC 유지 이유는
+[Spring 데이터 접근 조사](../../docs/conventions/spring-data-access.md)를 참고합니다.
 
 ## 🏗️ Architecture & Core Responsibilities
 

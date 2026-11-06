@@ -6,6 +6,7 @@ import com.robot.fleet.domain.telemetry.service.OfflineDetectorService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,7 +56,7 @@ public class SimulationService implements ApplicationRunner {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "동시 실행 상한에 도달했습니다.");
         }
         try { repository.insert(fleetId, request.robotId(), request.startX(), request.startY(), request.speed()); }
-        catch (org.springframework.dao.DuplicateKeyException conflict) {
+        catch (DuplicateKeyException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 사용한 로봇 ID입니다.");
         }
         return get(request.robotId());
@@ -111,7 +112,7 @@ public class SimulationService implements ApplicationRunner {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "종료된 실행 인스턴스입니다.");
         }
         try { repository.registerRuntime(fleetId, runtimeId); }
-        catch (org.springframework.dao.DuplicateKeyException conflict) {
+        catch (DuplicateKeyException conflict) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "종료된 실행 인스턴스입니다.");
         }
     }

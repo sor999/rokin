@@ -2,11 +2,17 @@ package com.robot.fleet.domain.presence;
 
 import com.robot.fleet.domain.presence.repository.PresenceRepository;
 import com.robot.fleet.domain.presence.service.PresenceService;
+import com.robot.fleet.domain.telemetry.dto.OfflineTelemetryDto;
+import com.robot.fleet.domain.telemetry.dto.StatusTelemetryDataDto;
 import com.robot.fleet.domain.telemetry.service.OfflineDetectorService;
 import com.robot.fleet.domain.telemetry.service.TelemetryStreamService;
 import org.junit.jupiter.api.*;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.time.OffsetDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -30,7 +36,7 @@ class PresenceServiceTest {
         // given
         var presence = mock(PresenceService.class);
         var stream = mock(TelemetryStreamService.class);
-        when(presence.expired()).thenThrow(new ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        when(presence.expired()).thenThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE));
         var detector = new OfflineDetectorService(presence, stream);
         // when
         detector.detectOfflineRobots();
@@ -42,13 +48,13 @@ class PresenceServiceTest {
         // given
         var presence = mock(PresenceService.class);
         var stream = mock(TelemetryStreamService.class);
-        var observedAt = java.time.OffsetDateTime.now().minusSeconds(31);
-        when(presence.expired()).thenReturn(java.util.List.of(new PresenceRepository.Expired("robot", "runtime", observedAt)));
+        var observedAt = OffsetDateTime.now().minusSeconds(31);
+        when(presence.expired()).thenReturn(List.of(new PresenceRepository.Expired("robot", "runtime", observedAt)));
         // when
         new OfflineDetectorService(presence, stream).detectOfflineRobots();
         // then
-        verify(stream).broadcast(new com.robot.fleet.domain.telemetry.dto.OfflineTelemetryDto("offline", "robot", observedAt,
-                "runtime", new com.robot.fleet.domain.telemetry.dto.StatusTelemetryDataDto("offline")));
+        verify(stream).broadcast(new OfflineTelemetryDto("offline", "robot", observedAt,
+                "runtime", new StatusTelemetryDataDto("offline")));
     }
 
 }

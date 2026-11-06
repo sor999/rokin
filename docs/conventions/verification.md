@@ -7,7 +7,10 @@
 ```bash
 cd services/api
 ./gradlew test
+./gradlew build
 ```
+
+Java import 규칙은 필요할 때 API 디렉터리에서 `./gradlew checkJavaFqcn`으로 수동 검사합니다. CI와 기본 빌드에는 연결하지 않습니다.
 
 ```bash
 cd services/worker

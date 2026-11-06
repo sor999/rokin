@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.domain.command.dto.CommandRequestDto;
 import com.robot.fleet.domain.command.dto.StopCommandDataDto;
+import com.robot.fleet.domain.realtime.RealtimeState;
+import com.robot.fleet.domain.simulation.service.SimulationService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -11,7 +13,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,13 +31,13 @@ class CommandServiceTest {
     private KafkaTemplate<String, String> kafkaTemplate;
 
     @Mock
-    private com.robot.fleet.domain.simulation.service.SimulationService simulations;
+    private SimulationService simulations;
 
     @Test
     @DisplayName("명령에 서버의 Fleet 식별자와 cmd_id를 포함해 로봇 키로 발행한다")
     void sendCommand_IncludesFleetOwnership() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-        CommandService service = new CommandService(kafkaTemplate, mapper, "site-a", simulations, new com.robot.fleet.domain.realtime.RealtimeState(false));
+        CommandService service = new CommandService(kafkaTemplate, mapper, "site-a", simulations, new RealtimeState(false));
         CommandRequestDto request = new CommandRequestDto();
         request.setRobotId("robot_1");
         request.setCommand("stop");
@@ -56,7 +60,7 @@ class CommandServiceTest {
     @DisplayName("빈 Fleet 식별자나 consumer group 구분을 깨는 식별자를 거부한다")
     void constructor_RejectsInvalidFleetId() {
         for (String fleet : new String[]{"", "site.a", " ", "x".repeat(129)}) {
-            assertThatThrownBy(() -> new CommandService(kafkaTemplate, new ObjectMapper(), fleet, simulations, new com.robot.fleet.domain.realtime.RealtimeState(false)))
+            assertThatThrownBy(() -> new CommandService(kafkaTemplate, new ObjectMapper(), fleet, simulations, new RealtimeState(false)))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -65,10 +69,10 @@ class CommandServiceTest {
     void sendCommand_IncludesSimulationInstance() throws Exception {
         // given
         ObjectMapper mapper = new ObjectMapper();
-        CommandService service = new CommandService(kafkaTemplate, mapper, "site-a", simulations, new com.robot.fleet.domain.realtime.RealtimeState(false));
+        CommandService service = new CommandService(kafkaTemplate, mapper, "site-a", simulations, new RealtimeState(false));
         CommandRequestDto request = new CommandRequestDto();
         request.setRobotId("robot_4"); request.setCommand("stop"); request.setData(new StopCommandDataDto());
-        given(simulations.commandContext("robot_4")).willReturn(java.util.Map.of(
+        given(simulations.commandContext("robot_4")).willReturn(Map.of(
                 "simulation_version", 3L, "simulation_runtime_id", "current-runtime"));
         given(kafkaTemplate.send(eq("cmd.robot"), eq("robot_4"), anyString()))
                 .willReturn(CompletableFuture.completedFuture(null));
@@ -86,7 +90,7 @@ class CommandServiceTest {
     @DisplayName("준비되지 않은 로봇의 명령은 Kafka 발행 전에 거부한다")
     void sendCommand_RejectsUnreadySimulation() {
         // given
-        CommandService service = new CommandService(kafkaTemplate, new ObjectMapper(), "site-a", simulations, new com.robot.fleet.domain.realtime.RealtimeState(false));
+        CommandService service = new CommandService(kafkaTemplate, new ObjectMapper(), "site-a", simulations, new RealtimeState(false));
         CommandRequestDto request = new CommandRequestDto(); request.setRobotId("robot_4");
         given(simulations.commandContext("robot_4")).willThrow(new IllegalArgumentException("not ready"));
         // when, then
@@ -99,11 +103,11 @@ class CommandServiceTest {
     @DisplayName("실시간 전달 경로가 준비되지 않으면 명령을 발행하지 않는다")
     void sendCommand_RejectsDisconnectedRealtime() {
         // given
-        var state = new com.robot.fleet.domain.realtime.RealtimeState(true);
+        var state = new RealtimeState(true);
         var service = new CommandService(kafkaTemplate, new ObjectMapper(), "site-a", simulations, state);
         // when, then
         assertThatThrownBy(() -> service.sendCommand(new CommandRequestDto()))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                .isInstanceOf(ResponseStatusException.class);
         then(kafkaTemplate).shouldHaveNoInteractions();
         then(simulations).shouldHaveNoInteractions();
     }

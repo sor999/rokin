@@ -9,7 +9,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/internal/simulations")
@@ -53,9 +55,9 @@ public class SimulationInternalController {
     @PostMapping("/reports")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void report(@RequestHeader(value = "X-Simulator-Token", required = false) String candidate,
-                       @RequestBody java.util.List<SimulationReport> reports) {
+                       @RequestBody List<SimulationReport> reports) {
         authenticate(candidate);
-        if (reports.size() > 100 || reports.stream().anyMatch(java.util.Objects::isNull)) throw new IllegalArgumentException("상태 보고 상한 초과");
+        if (reports.size() > 100 || reports.stream().anyMatch(Objects::isNull)) throw new IllegalArgumentException("상태 보고 상한 초과");
         reports.forEach(service::report);
     }
 }
