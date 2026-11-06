@@ -22,6 +22,7 @@ class FakeRobotNode(Node):
         self.declare_parameter('robot_id', 'robot_1')
         self.declare_parameter('fleet_id', os.environ.get('FLEET_ID', 'default'))
         self.declare_parameter('simulation_runtime_id', '')
+        self.declare_parameter('simulation_server_id', '')
         self.declare_parameter('publish_rate_hz', 2.0)
         self.declare_parameter('speed', 1.0)
         self.declare_parameter('start_x', 0.0)
@@ -109,6 +110,9 @@ class FakeRobotNode(Node):
                             cmd_payload.get('fleet_id') != self.fleet_id or cmd_payload.get('robot_id') != self.robot_id or
                             self.lease and (type(cmd_payload.get('simulation_epoch')) is not int or cmd_payload.get('simulation_epoch') != self.lease.epoch)):
                 raise ValueError('Command belongs to another runtime generation')
+            server = self.get_parameter('simulation_server_id').value
+            if server and cmd_payload.get('simulation_server_id') != server:
+                raise ValueError('Command belongs to another execution server')
             self.get_logger().info(f"Received command: {command}")
 
             if self.journal:

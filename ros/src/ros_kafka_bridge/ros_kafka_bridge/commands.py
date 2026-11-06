@@ -133,3 +133,62 @@ class ManagedFleetCommandRouter(FleetCommandRouter):
                         or command.get('simulation_runtime_id') != self.runtime_id):
                     raise CommandRejected('Simulation is absent, stale, or belongs to a previous runtime')
             super().dispatch(command)
+
+
+class DistributedCommandRouter(FleetCommandRouter):
+    """독립 서버 group으로 소비하며 자기 서버와 현재 로봇 실행만 전달한다."""
+
+    def __init__(self, assignments, publish):
+        import threading
+        super().__init__(assignments.fleet, ['managed_placeholder'], publish)
+        self.assignments = assignments
+        self.ownership_lock = threading.RLock()
+        self.robot_ids = self.fleet_robot_ids = frozenset()
+
+    def consumer_group(self, prefix):
+        super().consumer_group(prefix)
+        return f'{prefix}.{self.fleet_id}.distributed.{self.assignments.runtime}'
+
+    def add(self, robot, version):
+        with self.ownership_lock:
+            self.robot_ids = self.fleet_robot_ids = self.robot_ids | {robot}
+
+    def remove(self, robot):
+        with self.ownership_lock:
+            self.robot_ids = self.fleet_robot_ids = self.robot_ids - {robot}
+
+    def owns_command(self, command):
+        robot = command.get('robot_id')
+        if not isinstance(robot, str):
+            return False
+        entry = self.assignments.snapshot().get(robot)
+        return (entry is not None and self.assignments.active(robot)
+                and command.get('simulation_server_id') == self.assignments.runtime
+                and command.get('simulation_runtime_id') == entry['executionId']
+                and type(command.get('simulation_epoch')) is int
+                and command['simulation_epoch'] == entry['assignmentVersion']
+                and type(command.get('simulation_version')) is int
+                and command['simulation_version'] == entry['version'])
+
+    def dispatch(self, command):
+        with self.ownership_lock:
+            if not isinstance(command, dict):
+                raise CommandRejected('Command must be an object')
+            fleet = command.get('fleet_id')
+            if not isinstance(fleet, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', fleet):
+                raise CommandRejected('Missing or invalid fleet_id')
+            if fleet != self.fleet_id:
+                return
+            target = command.get('simulation_server_id')
+            try:
+                if str(uuid.UUID(target)) != target:
+                    raise ValueError('Noncanonical server ID')
+            except (ValueError, TypeError, AttributeError):
+                raise CommandRejected('Missing or invalid execution server ID') from None
+            if target != self.assignments.runtime:
+                return
+            if not self.assignments.active():
+                raise RuntimeError('Execution server lease expired')
+            if not self.owns_command(command):
+                raise CommandRejected('Command belongs to another robot execution')
+            super().dispatch(command)
