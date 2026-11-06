@@ -8,28 +8,33 @@ import com.robot.fleet.domain.simulation.dto.*;
 import com.robot.fleet.domain.simulation.repository.SimulationRepository;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import com.robot.fleet.domain.telemetry.service.*;
+import com.robot.fleet.support.SimulationJpaTestDatabase;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
-import javax.sql.DataSource;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.sql.*;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.sql.DataSource;
 
 import static org.assertj.core.api.Assertions.*;
 
 @Timeout(30)
 @EnabledIfEnvironmentVariable(named = "PRESENCE_TEST_URL", matches = ".+")
 class FleetDatabasePostgresTest {
+    private final SimulationJpaTestDatabase jpa = new SimulationJpaTestDatabase();
     private String schema;
     private DriverManagerDataSource source;
     private JdbcTemplate jdbc;
@@ -54,13 +59,14 @@ class FleetDatabasePostgresTest {
         source = new DriverManagerDataSource(url() + (url().contains("?") ? "&" : "?")
                 + "currentSchema=" + schema + "&ApplicationName=" + schema + "&socketTimeout=5", user(), password());
         jdbc = new JdbcTemplate(source);
-        tx = new TransactionTemplate(new DataSourceTransactionManager(source));
+        tx = jpa.transactions(source);
         stream = new TelemetryStreamService(new ObjectMapper(), new SimpleMeterRegistry());
         service = simulation("default", 3);
         snapshots = new RobotSnapshotRepository(jdbc, "default", 30);
         tx.executeWithoutResult(status -> service.registerRuntime(runtime));
     }
     @AfterEach void cleanup() throws Exception {
+        jpa.close();
         if (stream != null) stream.close();
         try (var c=DriverManager.getConnection(url(),user(),password()); var sql=c.createStatement()) {
             sql.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
@@ -68,7 +74,7 @@ class FleetDatabasePostgresTest {
     }
     private SimulationService simulation(String fleet, int maximum) {
         var presence = new PresenceService(new PresenceRepository(jdbc), fleet, 30);
-        return new SimulationService(new SimulationRepository(jdbc), new OfflineDetectorService(presence,stream),fleet,maximum);
+        return new SimulationService(jpa.repository(jdbc), new OfflineDetectorService(presence,stream),fleet,maximum);
     }
     private void create(SimulationService target, String robot) {
         tx.executeWithoutResult(status -> target.create(new CreateSimulationRequest(robot,0.0,0.0,1.0)));
@@ -145,10 +151,10 @@ class FleetDatabasePostgresTest {
         DataSource counted=new AbstractDataSource() {
             @Override public Connection getConnection() throws SQLException {
                 var actual=source.getConnection();
-                return (Connection)java.lang.reflect.Proxy.newProxyInstance(Connection.class.getClassLoader(),new Class<?>[]{Connection.class},(proxy,method,args)->{
+                return (Connection)Proxy.newProxyInstance(Connection.class.getClassLoader(),new Class<?>[]{Connection.class},(proxy,method,args)->{
                     if (method.getName().equals("prepareStatement")) calls.incrementAndGet();
                     try { return method.invoke(actual,args); }
-                    catch (java.lang.reflect.InvocationTargetException e) { throw e.getCause(); }
+                    catch (InvocationTargetException e) { throw e.getCause(); }
                 });
             }
             @Override public Connection getConnection(String u,String p) throws SQLException { return getConnection(); }
@@ -174,7 +180,7 @@ class FleetDatabasePostgresTest {
         create(service,"first"); create(service,"second");
         try(var holder=source.getConnection(); var executor=Executors.newFixedThreadPool(8)) {
             holder.setAutoCommit(false);
-            new SimulationRepository(connectionJdbc(holder)).lockFleet("default");
+            jpa.repository(connectionJdbc(holder)).lockFleet("default");
             var tasks=new ArrayList<Future<Boolean>>();
             // when
             for(int i=0;i<12;i++) {
@@ -186,7 +192,7 @@ class FleetDatabasePostgresTest {
             for(var task:tasks) if(task.get(10,TimeUnit.SECONDS)) accepted++;
             // then
             assertThat(accepted).isEqualTo(1);
-            assertThat(new SimulationRepository(jdbc).countActive("default")).isEqualTo(3);
+            assertThat(jpa.repository(jdbc).countActive("default")).isEqualTo(3);
         }
     }
 
@@ -194,10 +200,10 @@ class FleetDatabasePostgresTest {
     void create_IndependentFleetsAndGlobalUniqueId() throws Exception {
         // given
         var other=simulation("other",3);
-        tx.executeWithoutResult(status -> new SimulationRepository(jdbc).lockFleet("other"));
+        tx.executeWithoutResult(status -> jpa.repository(jdbc).lockFleet("other"));
         try(var holder=source.getConnection();var executor=Executors.newFixedThreadPool(2)) {
             holder.setAutoCommit(false);
-            new SimulationRepository(connectionJdbc(holder)).lockFleet("default");
+            jpa.repository(connectionJdbc(holder)).lockFleet("default");
             // when, then
             executor.submit(()->create(other,"other_robot")).get(2,TimeUnit.SECONDS);
             holder.commit();
@@ -222,7 +228,7 @@ class FleetDatabasePostgresTest {
                 waitForLocks(1);
                 // when, then
                 executor.submit(()->report("second",1,"RUNNING",runtime)).get(2,TimeUnit.SECONDS);
-                assertThat(new SimulationRepository(jdbc).find("default","second").orElseThrow().state()).isEqualTo("RUNNING");
+                assertThat(jpa.repository(jdbc).find("default","second").orElseThrow().state()).isEqualTo("RUNNING");
                 String next=UUID.randomUUID().toString();
                 var replacement=executor.submit(()->tx.executeWithoutResult(status->service.registerRuntime(next)));
                 waitForLocks(2);
@@ -230,8 +236,8 @@ class FleetDatabasePostgresTest {
                 blocked.get(5,TimeUnit.SECONDS);replacement.get(5,TimeUnit.SECONDS);
                 report("first",1,"RUNNING",next);
                 report("first",1,"FAILED",runtime);
-                assertThat(new SimulationRepository(jdbc).find("default","first").orElseThrow().runtimeId()).isEqualTo(next);
-                assertThat(new SimulationRepository(jdbc).find("default","first").orElseThrow().state()).isEqualTo("RUNNING");
+                assertThat(jpa.repository(jdbc).find("default","first").orElseThrow().runtimeId()).isEqualTo(next);
+                assertThat(jpa.repository(jdbc).find("default","first").orElseThrow().state()).isEqualTo("RUNNING");
             } finally { holder.rollback(); }
         }
     }
@@ -248,10 +254,10 @@ class FleetDatabasePostgresTest {
             try {
                 waitForLocks(1);
                 // when
-                new SimulationRepository(held).delete("first");
+                jpa.repository(held).delete("first");
                 holder.commit();pending.get(5,TimeUnit.SECONDS);
                 // then
-                var robot=new SimulationRepository(jdbc).find("default","first").orElseThrow();
+                var robot=jpa.repository(jdbc).find("default","first").orElseThrow();
                 assertThat(robot.version()).isEqualTo(2);assertThat(robot.state()).isEqualTo("DELETING");
             } finally { holder.rollback(); }
         }
@@ -322,7 +328,7 @@ class FleetDatabasePostgresTest {
                 restricted.execute("SET ROLE "+role);
                 // when, then: projection permission failure rolls back the history row too.
                 assertThatThrownBy(()->pose(restricted,"limited",null,eventId,timestamp,1))
-                        .isInstanceOf(org.springframework.dao.DataAccessException.class);
+                        .isInstanceOf(DataAccessException.class);
                 assertThat(jdbc.queryForObject("SELECT count(*) FROM telemetry_pose WHERE robot_id='limited'",Integer.class)).isZero();
                 // when
                 jdbc.execute("GRANT SELECT,INSERT,UPDATE ON robot_latest TO "+role);

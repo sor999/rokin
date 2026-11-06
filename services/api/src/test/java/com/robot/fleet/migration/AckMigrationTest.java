@@ -5,10 +5,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.Statement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AckMigrationTest {
 
     @Test
-    @DisplayName("빈 PostgreSQL에 Flyway 전체 스키마와 Ack 상태 제약을 생성한다.")
+    @DisplayName("빈 PostgreSQL에 Flyway V3까지의 스키마와 Ack 상태 제약을 생성한다.")
     void migrate_EmptyDatabase() throws Exception {
         String schema = "migration_test_" + UUID.randomUUID().toString().replace("-", "");
         try (Connection connection = connection()) {
@@ -89,9 +91,9 @@ class AckMigrationTest {
                     statement.execute("CREATE SCHEMA " + schema);
                     statement.execute("SET search_path TO " + schema);
                     for (String migration : new String[]{"V1__create_telemetry_tables.sql", "V2__add_updated_at_columns.sql"}) {
-                        try (java.io.InputStream resource = getClass().getResourceAsStream("/db/migration/" + migration)) {
+                        try (InputStream resource = getClass().getResourceAsStream("/db/migration/" + migration)) {
                             assertThat(resource).isNotNull();
-                            statement.execute(new String(resource.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                            statement.execute(new String(resource.readAllBytes(), StandardCharsets.UTF_8));
                         }
                     }
                     statement.execute("CREATE UNIQUE INDEX uq_ack_dedup ON robot_ack(cmd_id, status, timestamp)");
@@ -121,6 +123,7 @@ class AckMigrationTest {
                 .schemas(schema)
                 .defaultSchema(schema)
                 .locations("classpath:db/migration")
+                .target("3")
                 .load();
     }
 

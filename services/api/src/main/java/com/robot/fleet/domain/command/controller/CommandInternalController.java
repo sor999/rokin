@@ -1,10 +1,12 @@
 package com.robot.fleet.domain.command.controller;
 
+import com.robot.fleet.domain.command.service.CommandDeliveryMetrics;
 import com.robot.fleet.domain.command.service.DurableCommandService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
@@ -14,8 +16,8 @@ import java.util.*;
 public class CommandInternalController {
     private final DurableCommandService service;
     private final String token;
-    private final com.robot.fleet.domain.command.service.CommandDeliveryMetrics metrics;
-    public CommandInternalController(DurableCommandService service,com.robot.fleet.domain.command.service.CommandDeliveryMetrics metrics,@Value("${simulation.internal-token:}") String token) { this.service=service; this.token=token; this.metrics=metrics; }
+    private final CommandDeliveryMetrics metrics;
+    public CommandInternalController(DurableCommandService service,CommandDeliveryMetrics metrics,@Value("${simulation.internal-token:}") String token) { this.service=service; this.token=token; this.metrics=metrics; }
     private void authenticate(String candidate) {
         if (token.isBlank()) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"관리 토큰 미설정");
         if (candidate==null || !MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8),candidate.getBytes(StandardCharsets.UTF_8)))

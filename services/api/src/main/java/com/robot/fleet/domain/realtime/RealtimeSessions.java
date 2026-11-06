@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 @RequiredArgsConstructor
@@ -23,7 +24,7 @@ public class RealtimeSessions implements WebSocketHandlerDecoratorFactory {
     public WebSocketHandler decorate(WebSocketHandler handler) {
         return new WebSocketHandlerDecorator(handler) {
             @Override public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-                var accepted = new java.util.concurrent.atomic.AtomicBoolean();
+                var accepted = new AtomicBoolean();
                 state.ifCurrent(state.generation(), () -> {
                     if (sessions.size() < 1000) { sessions.add(session); accepted.set(true); }
                 });

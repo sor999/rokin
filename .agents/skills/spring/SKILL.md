@@ -64,3 +64,10 @@ robot-platform/
 ## 4. 코드 주석 (Code Comments)
 - Java/Kotlin의 표준 `Javadoc/KDoc` 관례를 따릅니다.
 - 상세한 주석 작성 규칙(섹션 구분, 일관된 스타일)은 [공통 주석 컨벤션](../comment-conventions/SKILL.md)을 준수하세요.
+
+## 5. Java import와 FQCN
+
+- 운영 코드와 테스트 코드에서 타입은 명시적인 `import`와 단순 클래스명으로 작성한다. 필드, 제네릭, 생성자, annotation, `.class`, 정적 메서드 호출에도 동일하게 적용한다.
+- `mock(com.robot.fleet.domain.simulation.repository.SimulationRobotRepository.class)`처럼 패키지를 코드 본문에 직접 쓰지 않는다. import 누락을 FQCN으로 우회하지 않는다.
+- 동명 타입이 실제로 충돌할 때만 한쪽 타입의 FQCN을 허용하고, 가까운 주석으로 이유를 설명한다. 문자열 안의 JPQL 생성자 타입명, 설정 클래스명과 package/import 선언은 이 규칙의 대상이 아니다.
+- Java 작성과 리뷰 시 불필요한 FQCN이 없는지 확인한다. 필요하면 `services/api`에서 `./gradlew checkJavaFqcn`으로 수동 검사한다. CI와 기본 빌드에는 연결하지 않는다.

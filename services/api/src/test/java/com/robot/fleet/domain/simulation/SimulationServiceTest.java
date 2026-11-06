@@ -1,5 +1,7 @@
 package com.robot.fleet.domain.simulation;
 
+import com.robot.fleet.domain.robot.repository.RobotSnapshotRepository;
+import com.robot.fleet.domain.robot.service.RobotQueryService;
 import com.robot.fleet.domain.simulation.dto.*;
 import com.robot.fleet.domain.simulation.repository.SimulationRepository;
 import com.robot.fleet.domain.simulation.service.SimulationService;
@@ -10,25 +12,27 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.BDDMockito.given;
 
 @DataJpaTest
-@org.springframework.test.context.ActiveProfiles("test")
-@Import({SimulationRepository.class, SimulationService.class, com.robot.fleet.domain.robot.service.RobotQueryService.class, com.robot.fleet.domain.robot.repository.RobotSnapshotRepository.class})
+@ActiveProfiles("test")
+@Import({SimulationRepository.class, SimulationService.class, RobotQueryService.class, RobotSnapshotRepository.class})
 @TestPropertySource(properties = {
         "spring.sql.init.schema-locations=classpath:db/migration/V4__add_simulation_registry.sql,classpath:simulation-runtime-test.sql",
         "simulation.max-robots=3"})
 class SimulationServiceTest {
     @Autowired SimulationService service;
     @Autowired JdbcTemplate jdbc;
-    @Autowired com.robot.fleet.domain.robot.service.RobotQueryService queries;
+    @Autowired RobotQueryService queries;
     @MockBean OfflineDetectorService offline;
     private static final String RUNTIME = UUID.randomUUID().toString();
 
@@ -86,7 +90,7 @@ class SimulationServiceTest {
     @Test @DisplayName("잘못된 좌표와 속도 및 ROS 토픽에 사용할 수 없는 ID를 거부한다")
     void create_RejectsInvalidParameters() {
         // given
-        var inputs = java.util.List.of(new CreateSimulationRequest("1robot", 0.0, 0.0, 1.0),
+        var inputs = List.of(new CreateSimulationRequest("1robot", 0.0, 0.0, 1.0),
                 new CreateSimulationRequest("robot-x", 0.0, 0.0, 1.0),
                 new CreateSimulationRequest("robot", Double.NaN, 0.0, 1.0),
                 new CreateSimulationRequest("robot", 0.0, 0.0, 0.0),
@@ -166,7 +170,7 @@ class SimulationServiceTest {
         jdbc.update("INSERT INTO robot_ack(cmd_id,timestamp,robot_id,status,created_at,updated_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
                 UUID.randomUUID(), OffsetDateTime.now(), "ack_only", "done");
         // when, then
-        for (String id : java.util.List.of("battery_only", "status_only", "ack_only")) {
+        for (String id : List.of("battery_only", "status_only", "ack_only")) {
             assertThatThrownBy(() -> service.create(request(id))).isInstanceOf(ResponseStatusException.class);
         }
     }

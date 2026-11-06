@@ -1,6 +1,7 @@
 package com.robot.fleet.domain.realtime;
 
 import com.robot.fleet.domain.simulation.repository.SimulationRepository;
+import com.robot.fleet.domain.simulation.repository.SimulationRobotRepository;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import com.robot.fleet.domain.telemetry.service.OfflineDetectorService;
 import org.junit.jupiter.api.*;
@@ -38,7 +39,7 @@ class TelemetryFenceDeadlineTest {
                 sql.execute("CREATE TABLE " + schema + ".simulation_runtime_session(runtime_id text, fleet_id text, epoch bigint)");
                 var dataSource = new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?")
                         + "currentSchema=" + schema + "&socketTimeout=2&cancelSignalTimeout=1", user, password);
-                var target = new SimulationService(new SimulationRepository(new JdbcTemplate(dataSource)),
+                var target = new SimulationService(new SimulationRepository(new JdbcTemplate(dataSource), mock(SimulationRobotRepository.class)),
                         mock(OfflineDetectorService.class), "default", 20);
                 var advice = new TransactionInterceptor();
                 advice.setTransactionManager(new DataSourceTransactionManager(dataSource));

@@ -1,8 +1,9 @@
 package com.robot.fleet.domain.robot.service;
 
+import com.robot.fleet.domain.robot.dto.RobotStatusDto;
+import com.robot.fleet.domain.robot.repository.RobotSnapshotRepository;
 import com.robot.fleet.domain.telemetry.dto.BatteryDto;
 import com.robot.fleet.domain.telemetry.dto.PoseDto;
-import com.robot.fleet.domain.robot.dto.RobotStatusDto;
 import com.robot.fleet.domain.telemetry.repository.TelemetryBatteryRepository;
 import com.robot.fleet.domain.telemetry.repository.TelemetryPoseRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,7 @@ public class RobotQueryService {
 
     private final TelemetryPoseRepository poseRepo;
     private final TelemetryBatteryRepository batteryRepo;
-    private final com.robot.fleet.domain.robot.repository.RobotSnapshotRepository snapshots;
+    private final RobotSnapshotRepository snapshots;
 
     public List<RobotStatusDto> getAllRobots() { return getRobots("", null); }
 

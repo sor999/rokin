@@ -1,21 +1,25 @@
 package com.robot.fleet.domain.command.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.robot.fleet.domain.ack.service.AckQueryService;
 import com.robot.fleet.domain.command.dto.*;
 import com.robot.fleet.domain.command.repository.CommandOutboxRepository;
-import com.robot.fleet.domain.ack.service.AckQueryService;
 import com.robot.fleet.domain.realtime.RealtimeState;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
-import java.security.MessageDigest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.*;
 
 @Service
@@ -25,7 +29,7 @@ public class DurableCommandService {
     private final RealtimeState realtime;
     private final AckQueryService acks;
     private final ObjectMapper mapper;
-    private final ObjectMapper canonical = com.fasterxml.jackson.databind.json.JsonMapper.builder()
+    private final ObjectMapper canonical = JsonMapper.builder()
         .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS).build();
     private final TransactionTemplate transactions;
     private final String fleet;
@@ -72,10 +76,10 @@ public class DurableCommandService {
                     if(json.getBytes(StandardCharsets.UTF_8).length>16384) throw new IllegalArgumentException("명령 크기 상한 초과");
                     repository.save(id,fleet,request.getRobotId(),key,hash,json,sequence,expiry);
                 }
-                catch (com.fasterxml.jackson.core.JsonProcessingException e) { throw new IllegalArgumentException("명령 직렬화 실패",e); }
+                catch (JsonProcessingException e) { throw new IllegalArgumentException("명령 직렬화 실패",e); }
                 return id.toString();
             });
-        } catch (org.springframework.dao.DuplicateKeyException e) {
+        } catch (DuplicateKeyException e) {
             if (key==null) throw e;
             return repository.byKey(fleet,key).map(entry -> same(entry,hash)).orElseThrow(() -> e);
         }

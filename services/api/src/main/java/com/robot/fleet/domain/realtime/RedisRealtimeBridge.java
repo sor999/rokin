@@ -1,5 +1,6 @@
 package com.robot.fleet.domain.realtime;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.domain.ack.dto.AckDto;
 import com.robot.fleet.domain.telemetry.dto.TelemetryEvent;
@@ -15,6 +16,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.UUID;
 import java.util.concurrent.*;
 
 @Slf4j
@@ -28,7 +30,7 @@ public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
     private final RedisClient client;
     private final String channel;
     private final String probeChannel;
-    private final String probeToken = java.util.UUID.randomUUID().toString();
+    private final String probeToken = UUID.randomUUID().toString();
     private volatile long lastProbe;
     private final String fleetId;
     private final ObjectMapper mapper;
@@ -106,7 +108,7 @@ public class RedisRealtimeBridge implements RealtimePublisher, SmartLifecycle {
                     try {
                         delivery.execute(() -> {
                             try { receiver.receive(body, generation); }
-                            catch (IllegalArgumentException | com.fasterxml.jackson.core.JsonProcessingException error) {
+                            catch (IllegalArgumentException | JsonProcessingException error) {
                                 metrics.counter("fleet.realtime.invalid").increment();
                                 log.warn("Invalid realtime envelope rejected: {}", error.getClass().getSimpleName());
                             } catch (Exception error) { invalidate(generation); }

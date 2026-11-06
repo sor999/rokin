@@ -1,7 +1,12 @@
 package com.robot.fleet.domain.presence;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.robot.fleet.domain.command.dto.CommandRequestDto;
+import com.robot.fleet.domain.command.service.CommandService;
 import com.robot.fleet.domain.presence.repository.PresenceRepository;
 import com.robot.fleet.domain.presence.service.PresenceService;
+import com.robot.fleet.domain.realtime.LocalRealtimePublisher;
+import com.robot.fleet.domain.realtime.RealtimeState;
 import com.robot.fleet.domain.simulation.dto.CreateSimulationRequest;
 import com.robot.fleet.domain.simulation.dto.SimulationReport;
 import com.robot.fleet.domain.simulation.repository.SimulationRepository;
@@ -10,17 +15,23 @@ import com.robot.fleet.domain.telemetry.dto.PoseTelemetryDataDto;
 import com.robot.fleet.domain.telemetry.dto.PoseTelemetryDto;
 import com.robot.fleet.domain.telemetry.service.OfflineDetectorService;
 import com.robot.fleet.domain.telemetry.service.TelemetryStreamService;
+import com.robot.fleet.support.SimulationJpaTestDatabase;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.mockito.Mockito;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.sql.DriverManager;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.*;
 
@@ -28,6 +39,7 @@ import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "PRESENCE_TEST_URL", matches = ".+")
 class PresencePostgresTest {
+    private final SimulationJpaTestDatabase jpa = new SimulationJpaTestDatabase();
     private String schema;
     private DriverManagerDataSource source;
     private JdbcTemplate jdbc;
@@ -44,7 +56,7 @@ class PresencePostgresTest {
     void prepare() {
         schema = "presence_test_" + UUID.randomUUID().toString().replace("-", "");
         var configuration = Flyway.configure().dataSource(url(), user(), password()).schemas(schema);
-        configuration.getPluginRegister().getPlugin(org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension.class)
+        configuration.getPluginRegister().getPlugin(PostgreSQLConfigurationExtension.class)
                 .setTransactionalLock(false);
         configuration.load().migrate();
         source = new DriverManagerDataSource(url() + (url().contains("?") ? "&" : "?")
@@ -54,8 +66,8 @@ class PresencePostgresTest {
         first = new PresenceService(repository, "default", 30);
         second = new PresenceService(new PresenceRepository(new JdbcTemplate(source)), "default", 30);
         stream = new TelemetryStreamService(new ObjectMapper(), new SimpleMeterRegistry());
-        apiA = new SimulationService(new SimulationRepository(jdbc), new OfflineDetectorService(first, stream), "default", 20);
-        apiB = new SimulationService(new SimulationRepository(new JdbcTemplate(source)), new OfflineDetectorService(second, stream), "default", 20);
+        apiA = new SimulationService(jpa.repository(jdbc), new OfflineDetectorService(first, stream), "default", 20);
+        apiB = new SimulationService(jpa.repository(new JdbcTemplate(source)), new OfflineDetectorService(second, stream), "default", 20);
         apiA.create(new CreateSimulationRequest("robot", 0.0, 0.0, 1.0));
         apiA.registerRuntime(runtime);
         apiA.report(new SimulationReport("robot", 1, "RUNNING", null, runtime));
@@ -63,6 +75,7 @@ class PresencePostgresTest {
 
     @AfterEach
     void cleanup() throws Exception {
+        jpa.close();
         if (stream != null) stream.close();
         try (var admin = DriverManager.getConnection(url(), user(), password()); var sql = admin.createStatement()) {
             sql.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
@@ -145,7 +158,7 @@ class PresencePostgresTest {
         var start = new CountDownLatch(1);
         var timestamp = now().minusSeconds(5);
         try (var executor = Executors.newFixedThreadPool(8)) {
-            var tasks = new java.util.ArrayList<Future<Boolean>>();
+            var tasks = new ArrayList<Future<Boolean>>();
             for (int i = 0; i < 16; i++) {
                 var time = timestamp.minusSeconds(i);
                 tasks.add(executor.submit(() -> { start.await(); return first.observe(event(runtime, time)); }));
@@ -189,17 +202,17 @@ class PresencePostgresTest {
         // given
         var brokenSource = new DriverManagerDataSource("jdbc:postgresql://127.0.0.1:1/unavailable?connectTimeout=1", user(), password());
         var brokenPresence = new PresenceService(new PresenceRepository(new JdbcTemplate(brokenSource)), "default", 30);
-        var simulation = new SimulationService(new SimulationRepository(jdbc), new OfflineDetectorService(brokenPresence, stream), "default", 20);
+        var simulation = new SimulationService(jpa.repository(jdbc), new OfflineDetectorService(brokenPresence, stream), "default", 20);
         @SuppressWarnings("unchecked")
-        org.springframework.kafka.core.KafkaTemplate<String, String> kafka = org.mockito.Mockito.mock(org.springframework.kafka.core.KafkaTemplate.class);
-        var commands = new com.robot.fleet.domain.command.service.CommandService(kafka, new ObjectMapper(), "default", simulation,
-                new com.robot.fleet.domain.realtime.RealtimeState(false));
-        var request = new com.robot.fleet.domain.command.dto.CommandRequestDto();
+        KafkaTemplate<String, String> kafka = Mockito.mock(KafkaTemplate.class);
+        var commands = new CommandService(kafka, new ObjectMapper(), "default", simulation,
+                new RealtimeState(false));
+        var request = new CommandRequestDto();
         request.setRobotId("robot"); request.setCommand("stop");
         // when, then
         assertThatThrownBy(() -> commands.sendCommand(request)).isInstanceOfSatisfying(ResponseStatusException.class,
                 error -> assertThat(error.getStatusCode().value()).isEqualTo(503));
-        org.mockito.Mockito.verifyNoInteractions(kafka);
+        Mockito.verifyNoInteractions(kafka);
     }
 
     @Test @DisplayName("미래 관측의 중복 수신은 최초 유효기간을 연장하지 않는다")
@@ -226,7 +239,7 @@ class PresencePostgresTest {
         first.observe(new PoseTelemetryDto("pose", "static", now(), null, new PoseTelemetryDataDto(0, 0)));
         try (var connection = source.getConnection()) {
             connection.setAutoCommit(false);
-            var txJdbc = new JdbcTemplate(new org.springframework.jdbc.datasource.SingleConnectionDataSource(connection, true));
+            var txJdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
             txJdbc.queryForObject("SELECT CURRENT_TIMESTAMP", OffsetDateTime.class);
             txJdbc.update("UPDATE simulation_robot SET reported_at = CURRENT_TIMESTAMP - INTERVAL '9' SECOND");
             // when
@@ -235,7 +248,7 @@ class PresencePostgresTest {
             // then
             assertThat(txPresence.online("default", "static", null, 1)).isFalse();
             assertThat(txPresence.online("default", "robot", runtime, 30)).isFalse();
-            var txApi = new SimulationService(new SimulationRepository(txJdbc),
+            var txApi = new SimulationService(jpa.repository(txJdbc),
                     new OfflineDetectorService(new PresenceService(txPresence, "default", 30), stream), "default", 20);
             refused(txApi);
             connection.rollback();
@@ -268,19 +281,19 @@ class PresencePostgresTest {
     @Test @DisplayName("로컬 전송 전 삭제와 runtime 교체를 다시 확인해 과거 관측을 보내지 않는다")
     void localPublisher_FencesTransitionsAfterObservation() {
         // given
-        var messaging=org.mockito.Mockito.mock(org.springframework.messaging.simp.SimpMessagingTemplate.class);
-        var localStream=org.mockito.Mockito.mock(TelemetryStreamService.class);
-        var publisher=new com.robot.fleet.domain.realtime.LocalRealtimePublisher(localStream,messaging,first);
+        var messaging=Mockito.mock(SimpMessagingTemplate.class);
+        var localStream=Mockito.mock(TelemetryStreamService.class);
+        var publisher=new LocalRealtimePublisher(localStream,messaging,first);
         var old=event(runtime,now());
         assertThat(first.observe(old)).isTrue();
         publisher.telemetry(UUID.randomUUID().toString(),old);
-        org.mockito.Mockito.verify(localStream).broadcast(old);
-        org.mockito.Mockito.clearInvocations(localStream);
+        Mockito.verify(localStream).broadcast(old);
+        Mockito.clearInvocations(localStream);
         // when
         apiA.registerRuntime(UUID.randomUUID().toString());
         publisher.telemetry(UUID.randomUUID().toString(),old);
         // then
-        org.mockito.Mockito.verifyNoInteractions(localStream);
+        Mockito.verifyNoInteractions(localStream);
         // given
         var current=apiA.list().getFirst().runtimeId();
         apiA.report(new SimulationReport("robot",1,"RUNNING",null,current));
@@ -290,7 +303,7 @@ class PresencePostgresTest {
         apiA.delete("robot");
         publisher.telemetry(UUID.randomUUID().toString(),fresh);
         // then
-        org.mockito.Mockito.verifyNoInteractions(localStream);
+        Mockito.verifyNoInteractions(localStream);
     }
 
 }

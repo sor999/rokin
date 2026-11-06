@@ -1,11 +1,15 @@
 package com.robot.fleet.domain.simulation;
 
 import com.robot.fleet.domain.simulation.controller.*;
+import com.robot.fleet.domain.simulation.dto.SimulationDto;
+import com.robot.fleet.domain.simulation.dto.SimulationReport;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import com.robot.fleet.global.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.*;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.List;
 
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -27,10 +31,10 @@ class SimulationControllerTest {
     void publicApi_ReturnsAccepted() throws Exception {
         // given
         String body = "{\"robotId\":\"robot_4\",\"startX\":0,\"startY\":0,\"speed\":1}";
-        var dto = new com.robot.fleet.domain.simulation.dto.SimulationDto(
+        var dto = new SimulationDto(
                 "robot_4", "default", 0, 0, 1, "RUNNING", 1, "STARTING", null, null, null);
         when(service.create(any())).thenReturn(dto);
-        when(service.delete("robot_4")).thenReturn(new com.robot.fleet.domain.simulation.dto.SimulationDto(
+        when(service.delete("robot_4")).thenReturn(new SimulationDto(
                 "robot_4", "default", 0, 0, 1, "DELETED", 2, "DELETING", null, null, null));
         // when, then
         mvc.perform(post("/api/simulations").contentType("application/json").content(body)).andExpect(status().isAccepted())
@@ -50,7 +54,7 @@ class SimulationControllerTest {
         mvc.perform(post("/internal/simulations/reports").contentType("application/json").content(body))
                 .andExpect(status().isUnauthorized());
         verifyNoInteractions(service);
-        when(service.list()).thenReturn(java.util.List.of());
+        when(service.list()).thenReturn(List.of());
         mvc.perform(get("/internal/simulations").header("X-Simulator-Token", "test-only-token"))
                 .andExpect(status().isOk());
     }
@@ -63,7 +67,7 @@ class SimulationControllerTest {
         mvc.perform(post("/internal/simulations/reports").header("X-Simulator-Token", "test-only-token")
                 .contentType("application/json").content(body)).andExpect(status().isNoContent());
         // then
-        verify(service).report(new com.robot.fleet.domain.simulation.dto.SimulationReport("robot_4", 1, "RUNNING", null, runtime));
+        verify(service).report(new SimulationReport("robot_4", 1, "RUNNING", null, runtime));
     }
 
     @Test @DisplayName("런타임 등록은 토큰 없이 거부하고 인증 후에만 서비스에 전달한다")
