@@ -50,6 +50,9 @@ class DurableBridgeDelivery:
         try:
             for command in self.journal.pending():
                 robot = command['robot_id']
+                if hasattr(self.router, 'owns_command') and not self.router.owns_command(command):
+                    self.journal.reject_inbox(command['cmd_id'])
+                    continue
                 if getattr(self.router, 'runtime_id', None):
                     if (command.get('simulation_runtime_id') != self.router.runtime_id or
                             command.get('simulation_version') != self.router.versions.get(robot)):

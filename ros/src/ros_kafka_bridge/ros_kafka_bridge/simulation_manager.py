@@ -185,6 +185,9 @@ class SimulationManager(Node):
 
 
 def main(args=None):
+    if os.environ.get('SIMULATOR_DISTRIBUTED_ENABLED', 'false').lower() == 'true':
+        from .distributed_manager import main as distributed_main
+        return distributed_main(args)
     logging.basicConfig(level=logging.INFO)
     token = os.environ.get('SIMULATOR_INTERNAL_TOKEN', '')
     if not token:
