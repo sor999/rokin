@@ -6,9 +6,18 @@ import com.robot.fleet.domain.command.service.CommandService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpStatus;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
@@ -30,8 +39,8 @@ class CommandControllerTest {
         assertThat(response.requestId()).isEqualTo("invalid-key");assertThat(response.status()).isEqualTo("rejected");
         assertThat(response.cmdId()).isNull();assertThat(response.errorCode()).isEqualTo("INVALID_REQUEST");
     }
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.MethodSource("rejectionCases")
+    @ParameterizedTest
+    @MethodSource("rejectionCases")
     void commandFailuresReturnCorrelatedRejections(RuntimeException error, String expectedCode) {
         var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setRequestId("failed-request");
         given(commandService.sendCommand(request)).willThrow(error);
@@ -43,19 +52,19 @@ class CommandControllerTest {
             assertThat(result.message()).contains("자동으로 다시 보내지 마세요").doesNotContain("조회");
         }
     }
-    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> rejectionCases() {
-        return java.util.stream.Stream.of(
-            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.dao.DataAccessResourceFailureException("db down"),"STORAGE_UNAVAILABLE"),
-            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.transaction.TransactionSystemException("commit uncertain"),"STORAGE_UNAVAILABLE"),
-            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,"conflict"),"IDEMPOTENCY_CONFLICT"),
-            org.junit.jupiter.params.provider.Arguments.of(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,"offline"),"COMMAND_UNAVAILABLE"),
-            org.junit.jupiter.params.provider.Arguments.of(new IllegalStateException("send failure"),"DELIVERY_UNCERTAIN")
+    static Stream<Arguments> rejectionCases() {
+        return Stream.of(
+            Arguments.of(new DataAccessResourceFailureException("db down"),"STORAGE_UNAVAILABLE"),
+            Arguments.of(new TransactionSystemException("commit uncertain"),"STORAGE_UNAVAILABLE"),
+            Arguments.of(new ResponseStatusException(HttpStatus.CONFLICT,"conflict"),"IDEMPOTENCY_CONFLICT"),
+            Arguments.of(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"offline"),"COMMAND_UNAVAILABLE"),
+            Arguments.of(new IllegalStateException("send failure"),"DELIVERY_UNCERTAIN")
         );
     }
     @Test void keyedDurableStorageFailureProvidesSameKeyLookupOnly() {
         var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setRequestId("keyed");
         request.setIdempotencyKey("00000000-0000-0000-0000-000000000041");
-        given(commandService.sendCommand(request)).willThrow(new org.springframework.dao.DataAccessResourceFailureException("db"));
+        given(commandService.sendCommand(request)).willThrow(new DataAccessResourceFailureException("db"));
         given(commandService.durableEnabled()).willReturn(true);
         var result=controller.handleCommand(request);
         assertThat(result.errorCode()).isEqualTo("STORAGE_UNAVAILABLE");
@@ -63,7 +72,7 @@ class CommandControllerTest {
     }
     @Test void keyDoesNotEnableLookupForLegacyCommands() {
         var request=new CommandRequestDto(); request.setRobotId("robot_1");request.setIdempotencyKey("key");
-        given(commandService.sendCommand(request)).willThrow(new org.springframework.dao.DataAccessResourceFailureException("db"));
+        given(commandService.sendCommand(request)).willThrow(new DataAccessResourceFailureException("db"));
         var result=controller.handleCommand(request);
         assertThat(result.message()).doesNotContain("조회").contains("불확실");
     }

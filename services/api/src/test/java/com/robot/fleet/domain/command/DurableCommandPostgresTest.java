@@ -1,19 +1,24 @@
 package com.robot.fleet.domain.command;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.robot.fleet.domain.ack.service.AckQueryService;
+import com.robot.fleet.domain.command.dto.*;
 import com.robot.fleet.domain.command.repository.CommandOutboxRepository;
 import com.robot.fleet.domain.command.service.DurableCommandService;
-import com.robot.fleet.domain.command.dto.*;
-import com.robot.fleet.domain.ack.service.AckQueryService;
 import com.robot.fleet.domain.realtime.RealtimeState;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.util.*;
 import java.util.concurrent.*;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -31,7 +36,7 @@ class DurableCommandPostgresTest {
     @BeforeEach void setup() {
         schema="outbox_"+UUID.randomUUID().toString().replace("-","");
         var flyway=Flyway.configure().dataSource(url(),user(),password()).schemas(schema);
-        flyway.getPluginRegister().getPlugin(org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension.class).setTransactionalLock(false);
+        flyway.getPluginRegister().getPlugin(PostgreSQLConfigurationExtension.class).setTransactionalLock(false);
         flyway.load().migrate();
         source=new DriverManagerDataSource(url()+(url().contains("?")?"&":"?")+"currentSchema="+schema,user(),password());
         jdbc=new JdbcTemplate(source); repo=new CommandOutboxRepository(jdbc); simulations=mock(SimulationService.class);
@@ -60,7 +65,7 @@ class DurableCommandPostgresTest {
         when(simulations.commandContext(anyString())).thenThrow(new IllegalStateException("offline"));
         assertThat(service.accept(request(key))).isEqualTo(id);
         var changed=request(key); changed.setRobotId("robot_2");
-        assertThatThrownBy(()->service.accept(changed)).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(()->service.accept(changed)).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(()->service.accept(request(UUID.randomUUID().toString()))).isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isEqualTo(1);
     }
@@ -88,7 +93,7 @@ class DurableCommandPostgresTest {
     @Test void storageFailureRollsBackAllocatedSequenceAndAcceptance() {
         jdbc.execute("CREATE FUNCTION reject_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test storage failure'; END $$");
         jdbc.execute("CREATE TRIGGER fail_outbox BEFORE INSERT ON command_outbox FOR EACH ROW EXECUTE FUNCTION reject_outbox()");
-        assertThatThrownBy(()->service.accept(request(UUID.randomUUID().toString()))).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(()->service.accept(request(UUID.randomUUID().toString()))).isInstanceOf(DataAccessException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM command_outbox",Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM command_sequence",Integer.class)).isZero();
     }

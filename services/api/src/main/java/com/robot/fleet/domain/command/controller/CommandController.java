@@ -5,9 +5,12 @@ import com.robot.fleet.domain.command.dto.CommandRequestDto;
 import com.robot.fleet.domain.command.service.CommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.stereotype.Controller;
+import org.springframework.transaction.TransactionException;
+import org.springframework.web.server.ResponseStatusException;
 
 @Controller
 @RequiredArgsConstructor
@@ -32,9 +35,9 @@ public class CommandController {
             return CommandAcceptedResponseDto.of(cmdId, request.getRobotId(), request.getRequestId());
         } catch (IllegalArgumentException e) {
             return CommandAcceptedResponseDto.rejected(request,"INVALID_REQUEST","명령 입력을 확인해주세요.");
-        } catch (org.springframework.web.server.ResponseStatusException e) {
+        } catch (ResponseStatusException e) {
             return CommandAcceptedResponseDto.rejected(request,e.getStatusCode().value()==409 ? "IDEMPOTENCY_CONFLICT" : "COMMAND_UNAVAILABLE",e.getReason());
-        } catch (org.springframework.dao.DataAccessException | org.springframework.transaction.TransactionException e) {
+        } catch (DataAccessException | TransactionException e) {
             boolean recoverable = commandService.durableEnabled() && request.getIdempotencyKey()!=null
                     && !request.getIdempotencyKey().isBlank();
             String message = recoverable

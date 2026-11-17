@@ -1,5 +1,6 @@
 package com.robot.fleet.domain.telemetry.controller;
 
+import com.robot.fleet.domain.realtime.RealtimeState;
 import com.robot.fleet.domain.telemetry.service.TelemetryStreamService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -16,7 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class TelemetryStreamController {
 
     private final TelemetryStreamService streamService;
-    private final com.robot.fleet.domain.realtime.RealtimeState realtime;
+    private final RealtimeState realtime;
 
     // 클라이언트가 구독 시작: GET /api/stream/telemetry
     // 이후 robot_update SSE 이벤트로 실시간 텔레메트리 수신

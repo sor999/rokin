@@ -3,10 +3,13 @@ package com.robot.fleet.domain.telemetry.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.robot.fleet.domain.telemetry.dto.TelemetryEvent;
 import io.micrometer.core.instrument.*;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -45,7 +48,7 @@ public class TelemetryStreamService implements AutoCloseable {
                 set -> set.stream().mapToInt(Connection::pending).sum()).register(metrics);
     }
 
-    @jakarta.annotation.PostConstruct
+    @PostConstruct
     public void validateLimits() {
         if (maxConnections < 1 || queueCapacity < 1 || sendTimeoutMs < 1) throw new IllegalArgumentException("Invalid SSE limits");
     }
@@ -54,8 +57,8 @@ public class TelemetryStreamService implements AutoCloseable {
 
     synchronized SseEmitter registerEmitter(SseEmitter emitter) {
         if (stopped.get() || writers.get() >= maxConnections) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "실시간 연결 상한에 도달했습니다.");
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE, "실시간 연결 상한에 도달했습니다.");
         }
         if (monitoring.compareAndSet(false, true)) watchdog.scheduleAtFixedRate(this::checkSlowConnections, 100, 100, TimeUnit.MILLISECONDS);
         Connection connection = new Connection(emitter);
