@@ -1,5 +1,7 @@
 package com.robot.fleet.domain.simulation.repository;
 
+import java.util.Objects;
+
 import com.robot.fleet.domain.simulation.dto.SimulationDto;
 import com.robot.fleet.domain.simulation.dto.SimulationReport;
 import lombok.RequiredArgsConstructor;
@@ -93,7 +95,7 @@ public class SimulationRepository {
 
     public Optional<String> currentRuntime(String fleetId) {
         return jdbc.query("SELECT CASE WHEN lease_expires_at IS NULL OR lease_expires_at > clock_timestamp() THEN runtime_id ELSE NULL END FROM simulation_runtime_session WHERE fleet_id = ? ORDER BY epoch DESC LIMIT 1",
-                (rs, n) -> rs.getString(1), fleetId).stream().filter(java.util.Objects::nonNull).findFirst();
+                (rs, n) -> rs.getString(1), fleetId).stream().filter(Objects::nonNull).findFirst();
     }
 
     public boolean runtimeUsed(String runtimeId) {
@@ -120,6 +122,12 @@ public class SimulationRepository {
     public Optional<RuntimeOwner> runtimeOwner(String fleet) {
         return jdbc.query("SELECT runtime_id,epoch,lease_expires_at FROM simulation_runtime_session WHERE fleet_id=? ORDER BY epoch DESC LIMIT 1",
                 (rs,n)->new RuntimeOwner(rs.getString(1),rs.getLong(2),rs.getObject(3,OffsetDateTime.class)),fleet).stream().findFirst();
+    }
+
+    public boolean distributionContractUsed(String fleet) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM simulation_distribution_fleet WHERE fleet_id = ?)",
+                Boolean.class, fleet));
     }
 
     public boolean leaseContractUsed(String fleet) {

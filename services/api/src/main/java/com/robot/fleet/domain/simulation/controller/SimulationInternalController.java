@@ -1,5 +1,7 @@
 package com.robot.fleet.domain.simulation.controller;
 
+import com.robot.fleet.domain.simulation.dto.RuntimeLeaseDto;
+
 import com.robot.fleet.domain.simulation.dto.SimulationReport;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,7 +55,7 @@ public class SimulationInternalController {
     }
 
     @PostMapping("/lease")
-    public com.robot.fleet.domain.simulation.dto.RuntimeLeaseDto lease(
+    public RuntimeLeaseDto lease(
             @RequestHeader(value="X-Simulator-Token",required=false) String candidate,
             @RequestBody RuntimeRegistration registration) {
         authenticate(candidate);

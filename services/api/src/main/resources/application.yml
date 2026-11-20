@@ -83,6 +83,7 @@ logging:
     org.apache.kafka: ERROR
 
 simulation:
+  distributed-enabled: ${SIMULATOR_DISTRIBUTED_ENABLED:false}
   lease-enabled: ${SIMULATOR_LEASE_ENABLED:false}
   lease-millis: ${SIMULATOR_LEASE_MILLIS:12000}
   internal-token: ${SIMULATOR_INTERNAL_TOKEN:}

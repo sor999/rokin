@@ -1,5 +1,7 @@
 package com.robot.fleet.domain.simulation.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
+
 import com.robot.fleet.domain.simulation.dto.*;
 import com.robot.fleet.domain.simulation.repository.SimulationRepository;
 import com.robot.fleet.domain.telemetry.service.OfflineDetectorService;
@@ -30,7 +32,7 @@ public class SimulationService implements ApplicationRunner {
         this(repository, offlineDetector, fleetId, maxRobots, false, 12000);
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public SimulationService(SimulationRepository repository, OfflineDetectorService offlineDetector,
                              @Value("${fleet.id:default}") String fleetId,
                              @Value("${simulation.max-robots:20}") int maxRobots,
@@ -125,7 +127,7 @@ public class SimulationService implements ApplicationRunner {
             throw new IllegalArgumentException("잘못된 실행 인스턴스 ID입니다.");
         }
         repository.lockFleet(fleetId);
-        if (leaseEnabled || repository.leaseContractUsed(fleetId)) {
+        if (leaseEnabled || repository.leaseContractUsed(fleetId) || repository.distributionContractUsed(fleetId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Lease registration required");
         }
         if (repository.currentRuntime(fleetId).filter(runtimeId::equals).isPresent()) return;
@@ -182,6 +184,9 @@ public class SimulationService implements ApplicationRunner {
             throw new IllegalArgumentException("Invalid runtime ID");
         }
         repository.lockFleet(fleetId);
+        if (repository.distributionContractUsed(fleetId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Distributed registration required");
+        }
         var owner = repository.runtimeOwner(fleetId).orElse(null);
         var now = repository.now();
         boolean used = repository.runtimeUsed(runtime);
