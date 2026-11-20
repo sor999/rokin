@@ -130,6 +130,12 @@ class DeliveryJournal:
             self.db.execute("UPDATE inbox SET reported=0 WHERE cmd_id IN (SELECT cmd_id FROM execution WHERE fleet=? AND robot=? AND state IN ('INTENT','STARTED'))", (fleet, robot))
             self.db.execute("UPDATE execution SET state='UNKNOWN',unknown=1 WHERE fleet=? AND robot=? AND state IN ('INTENT','STARTED')", (fleet, robot))
 
+    def pending_robot(self, fleet, robot):
+        with self.lock:
+            return self.db.execute(
+                "SELECT EXISTS(SELECT 1 FROM inbox WHERE fleet=? AND robot=? AND state='PENDING')",
+                (fleet, robot)).fetchone()[0] == 1
+
     def recover_fleet(self, fleet):
         """프로세스 재시작 시 이전 실행 의도를 미확정으로 만들고 전송 기록은 보존한다."""
         with self.lock, self.db:
