@@ -18,6 +18,7 @@ from .durable_delivery import DurableBridgeDelivery
 from .producer import KafkaTelemetryProducer
 from .bridge_node import RosKafkaBridgeNode
 from .reconciliation import SimulationReconciler
+from .lease_renewal import LeaseRenewer
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,9 @@ class SimulationManager(Node):
         self.reconciler = SimulationReconciler(self.start_robot, self.stop_robot,
                                                lambda rid: self.bridge is not None and self.bridge.robot_ready(rid))
         if lease:
+            self.renewer = LeaseRenewer(
+                lease, lambda: self.request('/internal/simulations/lease', {'runtimeId': self.runtime_id}),
+                self.stop_event, fleet_id, runtime_id)
             self.recovery_journal=journal_from_env()
             if self.recovery_journal:
                 self.recovery_journal.recover_fleet(fleet_id)
@@ -76,19 +80,7 @@ class SimulationManager(Node):
 
     def renew(self):
         """권한 갱신을 목록 조회 및 보고와 분리해 HTTP 지연의 영향을 제한한다."""
-        while not self.stop_event.is_set():
-            try:
-                if self.lease.retired or (self.lease.epoch is not None and not self.lease.active()):
-                    return
-                started=self.lease.clock()
-                response=self.request('/internal/simulations/lease',{'runtimeId':self.runtime_id})
-                previous=self.lease.epoch
-                granted=self.lease.accept(response,started,self.fleet_id)
-                if granted and previous is None:
-                    logger.info('Runtime lease acquired runtime=%s epoch=%s',self.runtime_id,self.lease.epoch)
-            except Exception:
-                logger.warning('Runtime lease renewal failed; keeping only existing local deadline')
-            self.stop_event.wait(2)
+        self.renewer.run()
 
     def sync(self):
         registered = False

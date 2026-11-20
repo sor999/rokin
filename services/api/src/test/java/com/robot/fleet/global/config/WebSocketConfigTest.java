@@ -1,5 +1,7 @@
 package com.robot.fleet.global.config;
 
+import com.robot.fleet.domain.realtime.RealtimeSessions;
+import com.robot.fleet.domain.realtime.RealtimeState;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,8 +22,8 @@ class WebSocketConfigTest {
         try (var context = new AnnotationConfigWebApplicationContext()) {
             context.setServletContext(new MockServletContext());
             TestPropertyValues.of("fleet.websocket.preserve-receive-order=" + enabled).applyTo(context);
-            context.register(WebSocketConfig.class, com.robot.fleet.domain.realtime.RealtimeState.class,
-                    com.robot.fleet.domain.realtime.RealtimeSessions.class);
+            context.register(WebSocketConfig.class, RealtimeState.class,
+                    RealtimeSessions.class);
 
             // when
             context.refresh();

@@ -5,6 +5,7 @@ import com.robot.fleet.domain.telemetry.dto.*;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.*;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -87,7 +88,7 @@ class TelemetryStreamServiceTest {
             ReflectionTestUtils.setField(stream, "queueCapacity", 2);
             Emitter slow = new Emitter(true);
             stream.registerEmitter(slow);
-            assertThatThrownBy(() -> stream.registerEmitter(new Emitter(false))).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+            assertThatThrownBy(() -> stream.registerEmitter(new Emitter(false))).isInstanceOf(ResponseStatusException.class);
             stream.broadcast(event("robot_0", 1));
             assertThat(slow.entered.await(2, TimeUnit.SECONDS)).isTrue();
             // when

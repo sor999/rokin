@@ -1,15 +1,24 @@
 package com.robot.fleet.domain.realtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.robot.fleet.domain.ack.dto.AckDto;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import com.robot.fleet.domain.telemetry.dto.*;
 import com.robot.fleet.domain.telemetry.service.TelemetryStreamService;
 import org.junit.jupiter.api.*;
+import org.mockito.ArgumentCaptor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.*;
@@ -17,7 +26,7 @@ import static org.mockito.Mockito.*;
 
 class RealtimeReceiverTest {
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules()
-            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final SimulationService simulations = mock(SimulationService.class);
     private final TelemetryStreamService stream = mock(TelemetryStreamService.class);
     private final SimpMessagingTemplate messaging = mock(SimpMessagingTemplate.class);
@@ -72,7 +81,7 @@ class RealtimeReceiverTest {
             receiver.receive(mapper.writeValueAsString(new RealtimeReceiver.Envelope(1, "default", "ack", cmd + ":" + status, mapper.valueToTree(ack))), 0);
         }
         // then
-        var values = org.mockito.ArgumentCaptor.forClass(AckDto.class);
+        var values = ArgumentCaptor.forClass(AckDto.class);
         verify(messaging, times(2)).convertAndSend(eq("/topic/ack/robot_1"), values.capture());
         assertThat(values.getAllValues()).extracting(AckDto::status).containsExactly("accepted", "done");
     }
@@ -111,25 +120,25 @@ class RealtimeReceiverTest {
         // when
         assertThat(state.invalidate(0)).isEqualTo(1);
         // then
-        assertThatThrownBy(state::requireAvailable).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(state::requireAvailable).isInstanceOf(ResponseStatusException.class);
         assertThat(state.activate(0)).isFalse();
         assertThat(state.activate(1)).isTrue();
     }
     @Test @DisplayName("준비 상태 변경과 무효화는 같은 monitor에서 직렬 처리한다")
     void state_SerializesInvalidationWithActivation() throws Exception {
         // given
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
-            java.util.concurrent.Future<Long> invalidation;
+        var entered = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            Future<Long> invalidation;
             synchronized (state) {
                 state.activate(0);
                 invalidation = executor.submit(() -> { entered.countDown(); return state.invalidate(0); });
-                assertThat(entered.await(1, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
                 // when, then
-                assertThatThrownBy(() -> invalidation.get(50, java.util.concurrent.TimeUnit.MILLISECONDS))
-                        .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                assertThatThrownBy(() -> invalidation.get(50, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(TimeoutException.class);
             }
-            assertThat(invalidation.get(1, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1);
+            assertThat(invalidation.get(1, TimeUnit.SECONDS)).isEqualTo(1);
             assertThat(state.available()).isFalse();
             assertThat(state.activate(0)).isFalse();
         }
@@ -157,7 +166,7 @@ class RealtimeReceiverTest {
 
     @Test @DisplayName("환경 변수 없이도 fence deadline의 트랜잭션 계약을 검증한다")
     void fence_DeclaresReadOnlyDeadline() throws Exception {
-        var attribute = new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()
+        var attribute = new AnnotationTransactionAttributeSource()
                 .getTransactionAttribute(SimulationService.class.getMethod("acceptsTelemetry", String.class, String.class), SimulationService.class);
         assertThat(attribute).isNotNull();
         assertThat(attribute.isReadOnly()).isTrue();
