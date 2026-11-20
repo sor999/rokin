@@ -165,7 +165,7 @@ public class DistributionRepository {
                 JOIN robot_latest l ON l.robot_id = a.robot_id AND l.runtime_id = a.execution_id AND l.kind = 'status'
                 JOIN simulation_robot s ON s.robot_id = a.robot_id
                 WHERE a.fleet_id = ? AND a.server_id = ? AND a.state = 'ASSIGNED'
-                    AND s.desired_state = 'RUNNING' AND l.state = 'idle'
+                    AND s.desired_state = 'RUNNING' AND l.state IN ('idle', 'arrived')
                     AND l.observed_at > clock_timestamp() - INTERVAL '5' SECOND
                     AND (a.last_command_at IS NULL OR
                         (a.last_command_at < clock_timestamp() - INTERVAL '10' SECOND

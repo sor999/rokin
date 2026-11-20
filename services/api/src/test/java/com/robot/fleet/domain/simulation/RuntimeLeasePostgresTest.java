@@ -1,6 +1,13 @@
 package com.robot.fleet.domain.simulation;
 
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.Map;
+
+import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
+
 import com.robot.fleet.domain.simulation.dto.*;
+import com.robot.fleet.support.SimulationJpaTestDatabase;
 import com.robot.fleet.domain.simulation.repository.SimulationRepository;
 import com.robot.fleet.domain.simulation.service.SimulationService;
 import com.robot.fleet.domain.telemetry.service.OfflineDetectorService;
@@ -10,7 +17,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.DriverManager;
@@ -22,6 +28,7 @@ import static org.mockito.Mockito.*;
 
 @EnabledIfEnvironmentVariable(named="PRESENCE_TEST_URL",matches=".+")
 class RuntimeLeasePostgresTest {
+    private final SimulationJpaTestDatabase database = new SimulationJpaTestDatabase();
     private String schema;
     private JdbcTemplate jdbc;
     private TransactionTemplate tx;
@@ -34,18 +41,19 @@ class RuntimeLeasePostgresTest {
     @BeforeEach void prepare() {
         schema="lease_test_"+UUID.randomUUID().toString().replace("-","");
         var config=Flyway.configure().dataSource(url(),user(),password()).schemas(schema);
-        config.getPluginRegister().getPlugin(org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension.class).setTransactionalLock(false);
+        config.getPluginRegister().getPlugin(PostgreSQLConfigurationExtension.class).setTransactionalLock(false);
         config.load().migrate();
         var source=new DriverManagerDataSource(url()+(url().contains("?")?"&":"?")+"currentSchema="+schema+"&ApplicationName="+schema,user(),password());
-        jdbc=new JdbcTemplate(source);tx=new TransactionTemplate(new DataSourceTransactionManager(source));tx.setTimeout(5);
-        repository=new SimulationRepository(jdbc);
+        jdbc=new JdbcTemplate(source);tx=database.transactions(source);tx.setTimeout(5);
+        repository=database.repository(jdbc);
         var offline=mock(OfflineDetectorService.class);
         apiA=new SimulationService(repository,offline,"default",20,true,12000);
-        apiB=new SimulationService(new SimulationRepository(new JdbcTemplate(source)),offline,"default",20,true,12000);
+        apiB=new SimulationService(database.repository(new JdbcTemplate(source)),offline,"default",20,true,12000);
         tx.executeWithoutResult(status->apiA.create(new CreateSimulationRequest("leased_robot",0.0,0.0,1.0)));
     }
 
     @AfterEach void cleanup() throws Exception {
+        database.close();
         try(var connection=DriverManager.getConnection(url(),user(),password());var sql=connection.createStatement()) {
             sql.execute("DROP SCHEMA IF EXISTS "+schema+" CASCADE");
         }
@@ -97,16 +105,16 @@ class RuntimeLeasePostgresTest {
         var first=claim(apiA,a);report(a,first.epoch());
         var presence=new PresenceRepository(jdbc);
         assertThat(presence.observe("default","leased_robot",a,OffsetDateTime.now(),30)).isTrue();
-        assertThat(tx.<java.util.Map<String,Object>>execute(status->apiA.commandContext("leased_robot"))).containsEntry("simulation_epoch",first.epoch());
+        assertThat(tx.<Map<String,Object>>execute(status->apiA.commandContext("leased_robot"))).containsEntry("simulation_epoch",first.epoch());
         var reported=jdbc.queryForObject("SELECT reported_at FROM simulation_robot WHERE robot_id='leased_robot'",OffsetDateTime.class);
         // when: 로컬 기한보다 늦은 서버 임대의 마지막 구간에도 새 명령은 접수하지 않는다.
         jdbc.update("UPDATE simulation_runtime_session SET lease_expires_at=clock_timestamp()+INTERVAL '4 second' WHERE runtime_id=?",a);
-        assertThatThrownBy(()->tx.execute(status->apiA.commandContext("leased_robot"))).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(()->tx.execute(status->apiA.commandContext("leased_robot"))).isInstanceOf(ResponseStatusException.class);
         jdbc.update("UPDATE simulation_runtime_session SET lease_expires_at=clock_timestamp()-INTERVAL '1 second' WHERE runtime_id=?",a);
         // then
         assertThat(claim(apiB,a).retired()).isTrue();
         assertThat(repository.currentRuntime("default")).isEmpty();
-        assertThatThrownBy(()->tx.execute(status->apiA.commandContext("leased_robot"))).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(()->tx.execute(status->apiA.commandContext("leased_robot"))).isInstanceOf(ResponseStatusException.class);
         assertThat(presence.online("default","leased_robot",a,30)).isFalse();
         assertThat(presence.observe("default","leased_robot",a,OffsetDateTime.now(),30)).isFalse();
         assertThat(presence.expired("default",30)).extracting(PresenceRepository.Expired::robotId).contains("leased_robot");
@@ -114,12 +122,12 @@ class RuntimeLeasePostgresTest {
         assertThat(jdbc.queryForObject("SELECT reported_at FROM simulation_robot WHERE robot_id='leased_robot'",OffsetDateTime.class)).isEqualTo(reported);
         var next=claim(apiB,b);
         assertThat(next.granted()).isTrue();assertThat(next.epoch()).isGreaterThan(first.epoch());
-        assertThatThrownBy(()->tx.execute(status->apiA.commandContext("leased_robot"))).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(()->tx.execute(status->apiA.commandContext("leased_robot"))).isInstanceOf(ResponseStatusException.class);
         report(b,first.epoch());
         assertThat(jdbc.queryForObject("SELECT runtime_id FROM simulation_robot WHERE robot_id='leased_robot'",String.class)).isEqualTo(a);
         report(b,next.epoch());
-        assertThat(tx.<java.util.Map<String,Object>>execute(status->apiA.commandContext("leased_robot"))).containsEntry("simulation_runtime_id",b);
+        assertThat(tx.<Map<String,Object>>execute(status->apiA.commandContext("leased_robot"))).containsEntry("simulation_runtime_id",b);
         var legacy=new SimulationService(repository,mock(OfflineDetectorService.class),"default",20);
-        assertThatThrownBy(()->tx.executeWithoutResult(status->legacy.registerRuntime(UUID.randomUUID().toString()))).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        assertThatThrownBy(()->tx.executeWithoutResult(status->legacy.registerRuntime(UUID.randomUUID().toString()))).isInstanceOf(ResponseStatusException.class);
     }
 }
