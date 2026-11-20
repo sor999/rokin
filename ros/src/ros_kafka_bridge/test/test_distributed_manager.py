@@ -34,6 +34,7 @@ class DistributedManagerTest(unittest.TestCase):
         try:
             with patch('ros_kafka_bridge.distributed_manager.RosKafkaBridgeNode', Bridge), \
                     patch.object(DistributedManager, 'sync', return_value=None), \
+                    patch.object(DistributedManager, 'renew', return_value=None), \
                     patch('ros_kafka_bridge.distributed_manager.journal_from_env', return_value=None):
                 manager = DistributedManager(executor, 'test', str(uuid.uuid4()), 20, 'test-only', 'http://unused')
             now = [100.0]
@@ -79,6 +80,53 @@ class DistributedManagerTest(unittest.TestCase):
             self.assertNotIn('one', manager.nodes)
             self.assertTrue(manager.releases.empty())
         finally:
+            if manager:
+                manager.destroy_node()
+            executor.shutdown()
+            rclpy.shutdown()
+
+    def test_report_request_cannot_block_independent_lease_pulses(self):
+        import rclpy
+        from rclpy.executors import SingleThreadedExecutor
+        from rclpy.node import Node
+        from types import SimpleNamespace
+        from ros_kafka_bridge.distributed_manager import DistributedManager
+
+        class Bridge(Node):
+            def __init__(self, **kwargs):
+                super().__init__('test_pulse_bridge', use_global_arguments=False)
+                self._router = SimpleNamespace(ownership_lock=threading.RLock())
+
+        report_blocked = threading.Event()
+        release_report = threading.Event()
+        pulse_while_blocked = threading.Event()
+
+        def request(manager, path, body):
+            if path == '/internal/distribution/pulse':
+                if report_blocked.is_set():
+                    pulse_while_blocked.set()
+                return dict(fleetId='test', runtimeId=manager.runtime,
+                            state='ACTIVE', ttlMillis=6000, assignments=[])
+            if path == '/internal/simulations/reports':
+                report_blocked.set()
+                release_report.wait(5)
+                return None
+            self.fail('Unexpected request path ' + path)
+
+        rclpy.init()
+        executor = SingleThreadedExecutor()
+        manager = None
+        try:
+            with patch('ros_kafka_bridge.distributed_manager.RosKafkaBridgeNode', Bridge), \
+                    patch.object(DistributedManager, 'request', request), \
+                    patch('ros_kafka_bridge.distributed_manager.journal_from_env', return_value=None):
+                manager = DistributedManager(executor, 'test', str(uuid.uuid4()), 20, 'test-only', 'http://unused')
+                manager.reports.put_nowait([dict(robotId='one', state='STARTING')])
+                self.assertTrue(report_blocked.wait(3))
+                self.assertTrue(pulse_while_blocked.wait(2))
+                self.assertTrue(manager.assignments.active())
+        finally:
+            release_report.set()
             if manager:
                 manager.destroy_node()
             executor.shutdown()

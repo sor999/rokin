@@ -17,6 +17,7 @@ from fake_robot.main_node import FakeRobotNode
 from .assignments import AssignmentSet
 from .bridge_node import RosKafkaBridgeNode
 from .durable_delivery import DurableBridgeDelivery
+from .lease_renewal import LeaseRenewer
 from .producer import KafkaTelemetryProducer
 
 
@@ -53,6 +54,15 @@ class DistributedManager(Node):
                 Parameter('kafka_broker', value=os.environ.get('KAFKA_BROKER_URL', 'kafka:29092')),
             ])
         executor.add_node(self.bridge)
+        self.renewer = LeaseRenewer(
+            self.assignments.server,
+            lambda: self.request('/internal/distribution/pulse', {
+                'runtimeId': self.runtime, 'capacity': self.capacity}),
+            self.stopping, fleet, runtime,
+            accept=lambda snapshot, started, _: self.assignments.accept(snapshot, started))
+        self.lease_thread = threading.Thread(
+            target=self.renew, name='distribution-lease-http', daemon=True)
+        self.lease_thread.start()
         self.create_timer(0.2, self.tick)
         self.thread = threading.Thread(target=self.sync, name='distribution-http', daemon=True)
         self.thread.start()
@@ -67,13 +77,18 @@ class DistributedManager(Node):
             data = response.read()
             return json.loads(data) if data else None
 
+    def renew(self):
+        self.renewer.run()
+
     def sync(self):
         pending_releases = []
-        registered = False
         while not self.stopping.is_set():
             if self.assignments.server.retired:
                 return
             try:
+                if not self.assignments.active():
+                    self.stopping.wait(0.2)
+                    continue
                 while len(pending_releases) < 100:
                     try:
                         pending_releases.append(self.releases.get_nowait())
@@ -85,19 +100,6 @@ class DistributedManager(Node):
                         'releases': pending_releases,
                     })
                     pending_releases = []
-                if (self.assignments.server.epoch is not None
-                        and not self.assignments.active()):
-                    return
-                started = self.assignments.clock()
-                snapshot = self.request('/internal/distribution/pulse', {
-                    'runtimeId': self.runtime,
-                    'capacity': self.capacity,
-                })
-                if not self.assignments.accept(snapshot, started):
-                    return
-                if not registered:
-                    self.get_logger().info('Execution server registered runtime=' + self.runtime)
-                    registered = True
                 try:
                     reports = self.reports.get_nowait()
                 except queue.Empty:
@@ -207,6 +209,7 @@ class DistributedManager(Node):
     def destroy_node(self):
         self.stopping.set()
         self.assignments.revoke()
+        self.lease_thread.join(timeout=7)
         self.thread.join(timeout=15)
         try:
             for robot in list(self.nodes):

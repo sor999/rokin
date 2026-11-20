@@ -11,7 +11,8 @@ AssignmentSet은 ROS 객체와 분리된 순수 상태다. 서버와 로봇별 l
 snapshot에 남아 있어도 되살리지 않는다. 종료한 실행의 기록은 10000개로 제한하며 상한에
 도달하면 새 서버 UUID로 재시작하도록 로컬 권한을 만료시킨다.
 
-DistributedManager는 HTTP와 ROS executor를 분리한다. ASSIGNED 로봇만 생성하며
+DistributedManager는 HTTP와 ROS executor를 분리한다. pulse는 보고·해제 요청과 독립적으로
+갱신하며 총 시간 예산과 최초 승인 실패 기한은 단일 런타임 갱신기와 공유한다. ASSIGNED 로봇만 생성하며
 RELEASING에서는 실제 idle 또는 arrived와 미처리 수신함 부재를 확인한 뒤 자원을 해제한다.
 이동 중 로봇은 정상 이전을 기다린다. 삭제 요청과 lease 만료는 기존 실행을 중단한다.
 실행 서버마다 별도 Kafka group을 사용하고 다른 서버 대상의 정상 명령은 건너뛴다.

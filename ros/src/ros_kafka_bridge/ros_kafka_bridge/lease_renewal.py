@@ -41,11 +41,12 @@ class BudgetedRequest:
 
 class LeaseRenewer:
     def __init__(self, lease, request, stop_event, fleet_id, runtime_id,
-                 period=1.0, budget=1.5, minimum_ttl_millis=6000):
+                 period=1.0, budget=1.5, minimum_ttl_millis=6000, accept=None):
         if (not all(math.isfinite(value) and value > 0 for value in (period, budget))
                 or max(period, budget) + budget >= minimum_ttl_millis / 1000 - lease.safety):
             raise ValueError('Unsafe lease renewal period, request budget and TTL')
         self.lease = lease
+        self.accept = accept if accept is not None else lease.accept
         self.request = request
         self.stop_event = stop_event
         self.fleet_id = fleet_id
@@ -72,7 +73,7 @@ class LeaseRenewer:
                     self.lease.revoke()
                     return
                 previous = self.lease.epoch
-                granted = self.lease.accept(response, started, self.fleet_id)
+                granted = self.accept(response, started, self.fleet_id)
                 failure_deadline = None
                 if granted and previous is None:
                     logger.info('Runtime lease acquired runtime=%s epoch=%s', self.runtime_id, self.lease.epoch)
