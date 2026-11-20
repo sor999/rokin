@@ -1,7 +1,9 @@
 package com.robot.fleet.domain.simulation.repository;
 
 import com.robot.fleet.domain.simulation.dto.SimulationDto;
+import com.robot.fleet.domain.simulation.dto.SimulationReport;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -13,6 +15,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class SimulationRepository {
     private final JdbcTemplate jdbc;
+    private final SimulationRobotRepository robots;
 
     public void lockFleet(String fleetId) {
         jdbc.update("INSERT INTO simulation_fleet_lock(fleet_id) VALUES (?) ON CONFLICT DO NOTHING", fleetId);
@@ -20,37 +23,29 @@ public class SimulationRepository {
     }
 
     public boolean lockRuntimeForReport(String fleetId) {
-        boolean postgres = Boolean.TRUE.equals(jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Boolean>)
+        boolean postgres = Boolean.TRUE.equals(jdbc.execute((ConnectionCallback<Boolean>)
                 connection -> connection.getMetaData().getDatabaseProductName().equals("PostgreSQL")));
         return !jdbc.query("SELECT fleet_id FROM simulation_fleet_lock WHERE fleet_id = ? "
                 + (postgres ? "FOR SHARE" : "FOR UPDATE"), (rs, n) -> rs.getString(1), fleetId).isEmpty();
     }
 
-    private final org.springframework.jdbc.core.RowMapper<SimulationDto> mapper = (rs, n) ->
-            new SimulationDto(rs.getString("robot_id"), rs.getString("fleet_id"), rs.getDouble("start_x"),
-                    rs.getDouble("start_y"), rs.getDouble("speed"), rs.getString("desired_state"),
-                    rs.getLong("config_version"), rs.getString("runtime_state"), rs.getString("error"),
-                    rs.getString("runtime_id"), rs.getObject("reported_at", OffsetDateTime.class));
-
     public List<SimulationDto> findAll(String fleetId) { return findAll(fleetId, false); }
 
     public List<SimulationDto> findAll(String fleetId, boolean activeOnly) {
-        return jdbc.query("SELECT * FROM simulation_robot WHERE fleet_id = ? "
-                + (activeOnly ? "AND runtime_state <> 'DELETED' " : "") + "ORDER BY robot_id", mapper, fleetId);
+        return activeOnly ? robots.findByFleetIdAndStateNotOrderByRobotId(fleetId, "DELETED")
+                : robots.findByFleetIdOrderByRobotId(fleetId);
     }
 
     public Optional<SimulationDto> find(String fleetId, String robotId) {
-        return jdbc.query("SELECT * FROM simulation_robot WHERE fleet_id = ? AND robot_id = ?", mapper, fleetId, robotId)
-                .stream().findFirst();
+        return robots.findByFleetIdAndRobotId(fleetId, robotId);
     }
 
     public long countActive(String fleetId) {
-        return jdbc.queryForObject("SELECT count(*) FROM simulation_robot WHERE fleet_id = ? AND runtime_state <> 'DELETED'", Long.class, fleetId);
+        return robots.countByFleetIdAndStateNot(fleetId, "DELETED");
     }
 
     public Optional<String> findOwner(String robotId) {
-        return jdbc.query("SELECT fleet_id FROM simulation_robot WHERE robot_id = ?",
-                (rs, n) -> rs.getString(1), robotId).stream().findFirst();
+        return robots.findOwnerByRobotId(robotId).map(SimulationRobotRepository.Owner::fleetId);
     }
 
     public boolean hasTelemetry(String robotId) {
@@ -82,7 +77,7 @@ public class SimulationRepository {
                 """, robotId);
     }
 
-    public void report(String fleetId, com.robot.fleet.domain.simulation.dto.SimulationReport report) {
+    public void report(String fleetId, SimulationReport report) {
         jdbc.update("""
                 UPDATE simulation_robot SET runtime_state = ?, error = ?, runtime_id = ?, reported_at = clock_timestamp()
                 WHERE robot_id = ? AND fleet_id = ? AND config_version = ?

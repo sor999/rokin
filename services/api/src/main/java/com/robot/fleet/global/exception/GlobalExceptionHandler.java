@@ -1,9 +1,14 @@
 package com.robot.fleet.global.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 @Slf4j
 @RestControllerAdvice
@@ -18,22 +23,22 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(ErrorCode.INVALID_REQUEST, message));
     }
 
-    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
-    public ResponseEntity<ErrorResponse> handleStatus(org.springframework.web.server.ResponseStatusException e) {
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleStatus(ResponseStatusException e) {
         return ResponseEntity.status(e.getStatusCode())
                 .body(ErrorResponse.of(ErrorCode.INVALID_REQUEST, e.getReason()));
     }
 
-    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleMalformedBody(Exception e) {
         return ResponseEntity.badRequest().body(ErrorResponse.of(ErrorCode.INVALID_REQUEST));
     }
 
-    @ExceptionHandler({org.springframework.dao.DataAccessException.class,
-            org.springframework.transaction.TransactionException.class})
+    @ExceptionHandler({DataAccessException.class,
+            TransactionException.class})
     public ResponseEntity<ErrorResponse> handleStorageUnavailable(Exception e) {
         log.warn("[API] 상태 저장소 사용 불가: {}", e.getClass().getSimpleName());
-        return ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR, "상태 저장소에 연결할 수 없습니다."));
     }
 

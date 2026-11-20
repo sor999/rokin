@@ -1,10 +1,12 @@
 package com.robot.fleet.domain.command.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.robot.fleet.domain.realtime.RealtimeState;
 import com.robot.fleet.domain.command.dto.CommandRequestDto;
-import org.springframework.beans.factory.annotation.Value;
+import com.robot.fleet.domain.realtime.RealtimeState;
+import com.robot.fleet.domain.simulation.service.SimulationService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
@@ -23,11 +25,11 @@ public class CommandService {
 
     private final RealtimeState realtime;
     private final String fleetId;
-    private final com.robot.fleet.domain.simulation.service.SimulationService simulations;
+    private final SimulationService simulations;
 
     public CommandService(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper,
                           @Value("${fleet.id:default}") String fleetId,
-                          com.robot.fleet.domain.simulation.service.SimulationService simulations,
+                          SimulationService simulations,
                           RealtimeState realtime) {
         if (fleetId == null || !fleetId.matches("[A-Za-z0-9_-]{1,128}")) {
             throw new IllegalArgumentException("Invalid fleet.id");
@@ -39,7 +41,7 @@ public class CommandService {
         this.realtime = realtime;
     }
 
-    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    @Autowired(required=false)
     private DurableCommandService durable;
 
     public boolean durableEnabled() { return durable != null && durable.enabled(); }
