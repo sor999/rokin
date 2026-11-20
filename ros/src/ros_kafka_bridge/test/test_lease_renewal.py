@@ -95,6 +95,79 @@ class LeaseRenewalTest(unittest.TestCase):
         self.assertTrue(self.lease.retired)
         self.assertEqual(4, self.lease.deadline)
 
+    def test_continuously_late_first_grants_retire_within_failure_window(self):
+        calls = []
+
+        def request():
+            calls.append(self.now[0])
+            self.now[0] += 1.6
+            return self.response
+
+        with self.assertLogs('ros_kafka_bridge.lease_renewal', level='WARNING'):
+            self.renewer(request, SimulatedStop(self.now, 20)).run()
+        self.assertTrue(self.lease.retired)
+        self.assertIsNone(self.lease.epoch)
+        self.assertEqual(4, len(calls))
+
+    def test_blocked_first_request_retires_without_waiting_forever(self):
+        stop = SimulatedStop(self.now, 20)
+        renewer = self.renewer(lambda: self.fail('unexpected request'), stop)
+
+        def blocked(request, budget):
+            self.now[0] += budget
+            raise TimeoutError('resolver blocked')
+
+        renewer.bounded_request = blocked
+        with self.assertLogs('ros_kafka_bridge.lease_renewal', level='WARNING'):
+            renewer.run()
+        self.assertTrue(self.lease.retired)
+        self.assertIsNone(self.lease.epoch)
+        self.assertEqual(6, self.now[0])
+
+    def test_transient_failure_before_first_grant_recovers(self):
+        calls = []
+
+        def request():
+            calls.append(self.now[0])
+            if len(calls) == 1:
+                raise OSError('temporary connection failure')
+            return self.response
+
+        with self.assertLogs('ros_kafka_bridge.lease_renewal', level='WARNING'):
+            self.renewer(request, SimulatedStop(self.now, 3)).run()
+        self.assertTrue(self.lease.active())
+        self.assertEqual(1, self.lease.epoch)
+
+    def test_normal_standby_responses_reset_failure_window(self):
+        calls = []
+
+        def request():
+            calls.append(self.now[0])
+            if len(calls) % 2 == 1:
+                raise OSError('temporary connection failure')
+            return dict(self.response, granted=False, ttlMillis=0)
+
+        with self.assertLogs('ros_kafka_bridge.lease_renewal', level='WARNING'):
+            self.renewer(request, SimulatedStop(self.now, 20)).run()
+        self.assertEqual(20, len(calls))
+        self.assertIsNone(self.lease.epoch)
+        self.assertFalse(self.lease.retired)
+
+    def test_grant_after_failure_window_does_not_activate_runtime(self):
+        calls = []
+
+        def request():
+            calls.append(self.now[0])
+            if len(calls) < 7:
+                raise OSError('temporary connection failure')
+            return self.response
+
+        with self.assertLogs('ros_kafka_bridge.lease_renewal', level='WARNING'):
+            self.renewer(request, SimulatedStop(self.now, 20)).run()
+        self.assertTrue(self.lease.retired)
+        self.assertEqual(6, len(calls))
+        self.assertFalse(self.lease.accept(self.response, self.now[0], 'default'))
+
     def test_blocked_request_times_out_without_spawning_more_workers(self):
         entered = threading.Event()
         release = threading.Event()

@@ -53,20 +53,35 @@ class LeaseRenewer:
         self.period = period
         self.budget = budget
         self.bounded_request = BudgetedRequest()
+        self.acquisition_failure_window = minimum_ttl_millis / 1000
 
     def run(self):
+        failure_deadline = None
         while not self.stop_event.is_set():
             if self.lease.retired or (self.lease.epoch is not None and not self.lease.active()):
                 return
             started = self.lease.clock()
+            if failure_deadline is not None and started >= failure_deadline:
+                self.lease.revoke()
+                return
             try:
                 response = self.bounded_request(self.request, self.budget)
                 if self.lease.clock() - started >= self.budget:
                     raise TimeoutError('Lease response arrived after total time budget')
+                if failure_deadline is not None and self.lease.clock() >= failure_deadline:
+                    self.lease.revoke()
+                    return
                 previous = self.lease.epoch
                 granted = self.lease.accept(response, started, self.fleet_id)
+                failure_deadline = None
                 if granted and previous is None:
                     logger.info('Runtime lease acquired runtime=%s epoch=%s', self.runtime_id, self.lease.epoch)
             except Exception:
+                if self.lease.epoch is None:
+                    if failure_deadline is None:
+                        failure_deadline = started + self.acquisition_failure_window
+                    if self.lease.clock() >= failure_deadline:
+                        self.lease.revoke()
+                        return
                 logger.warning('Runtime lease renewal failed; keeping only existing local deadline')
             self.stop_event.wait(max(0.0, self.period - (self.lease.clock() - started)))
