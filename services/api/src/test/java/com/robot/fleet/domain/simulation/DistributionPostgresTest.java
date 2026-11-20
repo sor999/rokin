@@ -1,6 +1,10 @@
 package com.robot.fleet.domain.simulation;
 
+import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension;
+
 import com.robot.fleet.domain.simulation.dto.*;
+import com.robot.fleet.support.SimulationJpaTestDatabase;
+import org.springframework.web.server.ResponseStatusException;
 import com.robot.fleet.domain.simulation.repository.DistributionRepository;
 import com.robot.fleet.domain.simulation.service.DistributionService;
 import static com.robot.fleet.domain.simulation.dto.DistributionDtos.*;
@@ -14,7 +18,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.DriverManager;
@@ -26,6 +29,7 @@ import static org.mockito.Mockito.*;
 
 @EnabledIfEnvironmentVariable(named = "PRESENCE_TEST_URL", matches = ".+")
 class DistributionPostgresTest {
+    private final SimulationJpaTestDatabase database = new SimulationJpaTestDatabase();
     private String schema;
     private JdbcTemplate jdbc;
     private TransactionTemplate tx;
@@ -51,7 +55,7 @@ class DistributionPostgresTest {
         schema = "distribution_test_" + UUID.randomUUID().toString().replace("-", "");
         var config = Flyway.configure().dataSource(url(), user(), password()).schemas(schema);
         config.getPluginRegister()
-                .getPlugin(org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension.class)
+                .getPlugin(PostgreSQLConfigurationExtension.class)
                 .setTransactionalLock(false);
         config.load().migrate();
         String separator = url().contains("?") ? "&" : "?";
@@ -59,9 +63,9 @@ class DistributionPostgresTest {
                 url() + separator + "currentSchema=" + schema + "&ApplicationName=" + schema,
                 user(), password());
         jdbc = new JdbcTemplate(source);
-        tx = new TransactionTemplate(new DataSourceTransactionManager(source));
+        tx = database.transactions(source);
         tx.setTimeout(5);
-        repository = new SimulationRepository(jdbc);
+        repository = database.repository(jdbc);
         distribution = new DistributionRepository(jdbc);
         apiA = new DistributionService(distribution, repository, "default", true, 12000);
         apiB = new DistributionService(new DistributionRepository(new JdbcTemplate(source)),
@@ -76,6 +80,7 @@ class DistributionPostgresTest {
 
     @AfterEach
     void cleanup() throws Exception {
+        database.close();
         try (var connection = DriverManager.getConnection(url(), user(), password());
              var sql = connection.createStatement()) {
             sql.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
@@ -194,12 +199,46 @@ class DistributionPostgresTest {
     }
 
     @Test
+    @DisplayName("도착한 로봇도 정상 재배분 대상에 포함한다")
+    void pulse_arrivedRobotCanBeRebalanced() {
+        String first = runtime();
+        var assignment = pulse(apiA, first, 6).assignments().getFirst();
+        jdbc.update("""
+                INSERT INTO robot_latest(robot_id, runtime_id, kind, event_id, observed_at, state)
+                VALUES (?, ?, 'status', ?, clock_timestamp(), 'arrived')
+                """, assignment.robotId(), assignment.executionId(), UUID.randomUUID());
+
+        pulse(apiB, runtime(), 6);
+
+        assertThat(distribution.assignments("default", first))
+                .filteredOn(a -> a.state().equals("RELEASING"))
+                .extracting(Assignment::robotId).containsExactly(assignment.robotId());
+    }
+
+    @Test
+    @DisplayName("분산 계약 사용 후 기존 등록과 단일 임대 획득을 거부한다")
+    void registerRuntime_distributedFleetCannotReturnToLegacyOwnership() {
+        pulse(apiA, runtime(), 6);
+        var legacy = new SimulationService(repository, mock(OfflineDetectorService.class), "default", 20);
+        var leased = new SimulationService(repository, mock(OfflineDetectorService.class), "default", 20, true, 12000);
+
+        assertThatThrownBy(() -> tx.executeWithoutResult(status -> legacy.registerRuntime(runtime())))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> tx.executeWithoutResult(status -> leased.lease(runtime())))
+                .isInstanceOf(ResponseStatusException.class);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM simulation_runtime_session", Integer.class)).isZero();
+        assertThat(distribution.assignments("default", distribution.servers("default").getFirst().runtimeId()))
+                .hasSize(6);
+    }
+
+    @Test
     void invalidInputDisabledModeAndRollbackDoNotRegisterServers() {
         assertThatThrownBy(() -> pulse(apiA, "invalid", 3)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> pulse(apiA, runtime(), 0)).isInstanceOf(IllegalArgumentException.class);
         var disabled = new DistributionService(distribution, repository, "default", false, 12000);
         assertThatThrownBy(() -> pulse(disabled, runtime(), 3))
-                .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+                .isInstanceOf(ResponseStatusException.class);
         String failed = runtime();
         tx.executeWithoutResult(status -> {
             apiA.pulse(new PulseRequest(failed, 3));

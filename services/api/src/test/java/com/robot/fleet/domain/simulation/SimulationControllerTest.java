@@ -1,5 +1,7 @@
 package com.robot.fleet.domain.simulation;
 
+import com.robot.fleet.domain.simulation.dto.RuntimeLeaseDto;
+
 import com.robot.fleet.domain.simulation.controller.*;
 import com.robot.fleet.domain.simulation.dto.SimulationDto;
 import com.robot.fleet.domain.simulation.dto.SimulationReport;
@@ -89,7 +91,7 @@ class SimulationControllerTest {
         // given
         String runtime="00000000-0000-0000-0000-000000000001";
         String body="{\"runtimeId\":\""+runtime+"\"}";
-        when(service.lease(runtime)).thenReturn(new com.robot.fleet.domain.simulation.dto.RuntimeLeaseDto("default",runtime,7,true,false,12000));
+        when(service.lease(runtime)).thenReturn(new RuntimeLeaseDto("default",runtime,7,true,false,12000));
         // when, then
         mvc.perform(post("/internal/simulations/lease").contentType("application/json").content(body)).andExpect(status().isUnauthorized());
         verifyNoInteractions(service);

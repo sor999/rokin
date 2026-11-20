@@ -29,7 +29,7 @@ ACTIVE이며 lease가 유효한 서버 중 배정 수/수용 한도가 가장 �
 한도를 넘기지 않으며 자리가 없으면 UNASSIGNED로 유지한다. 소유권은 DB에 남기고
 ASSIGNED → RELEASING → UNASSIGNED → 새 ASSIGNED 순서로 이전한다.
 
-정상 재분배는 최근 idle 관측, 마지막 명령 이후 10초 경과와 미수신 유효 outbox 부재를
+정상 재분배는 최근 idle 또는 arrived 관측, 마지막 명령 이후 10초 경과와 미수신 유효 outbox 부재를
 확인한 뒤 요청한다. RELEASING부터 새 명령을 거부한다. ROS executor가 실제 idle을
 다시 확인하고 명령 경로와 로봇을 해제한 뒤 종료 확인을 보고한다. 종료 확인 전에는 새
 소유자를 배정하지 않는다. 이동 중에는 정상 이전을 기다리며 삭제 요청은 이동도 중단한다.
