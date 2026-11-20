@@ -88,3 +88,13 @@ COMMAND_DURABLE_ENABLED에서 cmd_id에 더해 expires_at과 로봇별 command_s
 로봇은 영속 실행 의도와 결과로 재시작 후에도 중복을 억제한다. 새 Ack의 event_id와 fleet_id는
 Worker의 최종 수신 확인에 사용한다. 기존 Ack 상태 집합은 바꾸지 않으며 OUTCOME_UNKNOWN은
 명령 조회의 별도 전달 상태다. 상세 범위는 [ADR 0008](../decisions/0008-durable-command-delivery.md)을 따른다.
+
+## 관리 런타임의 임대 권한
+
+lease 모드의 Command에는 `simulation_epoch` 정수 토큰을 추가하고 상태 보고에는
+`runtimeEpoch`를 포함한다. 현재 runtime UUID와 epoch가 모두 맞고 로컬 임대가 유효한
+경우에만 실행한다. 만료된 UUID는 다시 활성화하지 않으며 새 UUID로 복구한다. API는
+서버 임대 잔여 기간이 5초 이하면 신규 명령을 거부한다. 텔레메트리는 기존 runtime ID로
+식별하며 API에서 현재 임대의 유효성도 검사한다. 정적 Bridge 메시지 형식은 유지한다.
+서로 다른 서버의 ROS 토픽 및 Kafka group 격리와 복구 조건은
+[ADR 0010](../decisions/0010-runtime-lease-failover.md)을 따른다.

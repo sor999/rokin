@@ -130,6 +130,16 @@ class DeliveryJournal:
             self.db.execute("UPDATE inbox SET reported=0 WHERE cmd_id IN (SELECT cmd_id FROM execution WHERE fleet=? AND robot=? AND state IN ('INTENT','STARTED'))", (fleet, robot))
             self.db.execute("UPDATE execution SET state='UNKNOWN',unknown=1 WHERE fleet=? AND robot=? AND state IN ('INTENT','STARTED')", (fleet, robot))
 
+    def recover_fleet(self, fleet):
+        """프로세스 재시작 시 이전 실행 의도를 미확정으로 만들고 전송 기록은 보존한다."""
+        with self.lock, self.db:
+            self.db.execute("""UPDATE inbox SET reported=0,state=CASE
+                WHEN EXISTS(SELECT 1 FROM execution e WHERE e.cmd_id=inbox.cmd_id AND e.state='DONE')
+                THEN 'RECEIVED' ELSE 'UNKNOWN' END WHERE fleet=? AND state='PENDING'""",(fleet,))
+            robots=[row[0] for row in self.db.execute('SELECT DISTINCT robot FROM execution WHERE fleet=?',(fleet,))]
+            for robot in robots:
+                self.recover(fleet,robot)
+
     def begin(self, command, now=None):
         """Commit execution intent before returning permission to change robot state."""
         signature = hashlib.sha256(encoded(command).encode()).hexdigest()

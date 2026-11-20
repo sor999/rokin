@@ -7,7 +7,8 @@ from urllib.request import Request, urlopen
 
 
 class DurableBridgeDelivery:
-    def __init__(self, journal, producer, router, publishers, logger):
+    def __init__(self, journal, producer, router, publishers, logger, lease=None):
+        self.lease=lease
         self.journal, self.producer, self.router, self.publishers, self.logger = journal, producer, router, publishers, logger
         self.api = os.environ.get('SIMULATOR_API_URL', 'http://api:8080').rstrip('/')
         self.token = os.environ.get('SIMULATOR_INTERNAL_TOKEN', '')
@@ -44,6 +45,8 @@ class DurableBridgeDelivery:
     def relay(self):
         # This method is invoked only by the ROS executor, never by the HTTP thread.
         from std_msgs.msg import String
+        if self.lease and not self.lease.active():
+            return
         try:
             for command in self.journal.pending():
                 robot = command['robot_id']
@@ -59,6 +62,8 @@ class DurableBridgeDelivery:
                     continue
                 msg = String()
                 msg.data = json.dumps(command)
+                if self.lease and not self.lease.active():
+                    return
                 publisher.publish(msg)
         except Exception:
             self.storage_error = True

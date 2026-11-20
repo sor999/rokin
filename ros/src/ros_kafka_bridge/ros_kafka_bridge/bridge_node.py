@@ -12,6 +12,7 @@ from .consumer import KafkaCommandConsumer
 from .commands import CommandRejected, FleetCommandRouter, ManagedFleetCommandRouter
 from .producer import KafkaTelemetryProducer
 from fake_robot.durability import journal_from_env
+from fake_robot.runtime_lease import topic_prefix
 from .durable_delivery import DurableBridgeDelivery
 
 
@@ -22,8 +23,9 @@ class RosKafkaBridgeNode(Node):
     - Kafka → ROS (Command): cmd.robot 토픽을 Consume해 각 로봇의 /fleet/{robot_id}/cmd 로 Relay
     """
 
-    def __init__(self, managed=False, runtime_id=None, **kwargs):
-        super().__init__('ros_kafka_bridge_node', **kwargs)
+    def __init__(self, managed=False, runtime_id=None, lease=None, **kwargs):
+        self.lease=lease
+        super().__init__('ros_kafka_bridge_node'+('_'+runtime_id.replace('-','')[:8] if lease else ''), **kwargs)
 
         # 파라미터 선언
         self.declare_parameter('kafka_broker', 'kafka:29092')
@@ -41,7 +43,7 @@ class RosKafkaBridgeNode(Node):
         if managed:
             self._robot_ids = []
             self._router = ManagedFleetCommandRouter(
-                self.get_parameter('fleet_id').value, self._on_kafka_command, runtime_id)
+                self.get_parameter('fleet_id').value, self._on_kafka_command, runtime_id, lease)
         else:
             self._router = FleetCommandRouter(
                 self.get_parameter('fleet_id').value, self._robot_ids, self._on_kafka_command,
@@ -65,7 +67,7 @@ class RosKafkaBridgeNode(Node):
             on_message=self._router.dispatch,
             dlq_topic=self.get_parameter('command_dlq_topic').value,
         )
-        self.delivery = DurableBridgeDelivery(self.journal, self._producer, self._router, self._cmd_publishers, self.get_logger()) if self.journal else None
+        self.delivery = DurableBridgeDelivery(self.journal, self._producer, self._router, self._cmd_publishers, self.get_logger(), lease=self.lease) if self.journal else None
         if self.delivery:
             self.create_timer(1.0, self.delivery.relay)
             self.delivery.start()
@@ -80,13 +82,14 @@ class RosKafkaBridgeNode(Node):
         if robot_id in self._cmd_publishers:
             return
         subscriptions = []
-        publisher = self.create_publisher(String, f'/fleet/{robot_id}/cmd', 10)
+        prefix=topic_prefix(robot_id,self._runtime_id if self.lease else None)
+        publisher = self.create_publisher(String, f'{prefix}/cmd', 10)
         try:
             for message_type, topic, callback in (
                     (Pose2D, 'pose', self._on_pose), (Float32, 'battery', self._on_battery),
                     (String, 'status', self._on_status), (String, 'ack', self._on_ack)):
                 subscriptions.append(self.create_subscription(
-                    message_type, f'/fleet/{robot_id}/{topic}',
+                    message_type, f'{prefix}/{topic}',
                     lambda msg, cb=callback: cb(robot_id, msg), 10))
         except Exception:
             for subscription in subscriptions:
@@ -107,7 +110,7 @@ class RosKafkaBridgeNode(Node):
     def robot_ready(self, robot_id):
         """Kafka 할당과 로봇 명령·관측 DDS 경로가 모두 준비됐는지 확인한다."""
         publisher = self._cmd_publishers.get(robot_id)
-        return ((not self.delivery or self.delivery.healthy()) and self._consumer.ready.is_set() and publisher is not None
+        return ((not self.lease or self.lease.active()) and (not self.delivery or self.delivery.healthy()) and self._consumer.ready.is_set() and publisher is not None
                 and publisher.get_subscription_count() > 0
                 and all(self.count_publishers(subscription.topic_name) > 0
                         for subscription in self._subscriptions_by_robot[robot_id]))
@@ -130,15 +133,21 @@ class RosKafkaBridgeNode(Node):
     # ROS → Kafka 콜백
 
     def _on_pose(self, robot_id: str, msg: Pose2D) -> None:
+        if self.lease and not self.lease.active():
+            return
         envelope = self._make_envelope(robot_id, 'pose', {'x': msg.x, 'y': msg.y})
         self._producer.produce('telemetry.pose', key=robot_id, value=envelope)
 
     def _on_battery(self, robot_id: str, msg: Float32) -> None:
+        if self.lease and not self.lease.active():
+            return
         envelope = self._make_envelope(robot_id, 'battery', {'level': msg.data})
         self._producer.produce('telemetry.battery', key=robot_id, value=envelope)
 
     def _on_status(self, robot_id: str, msg: String) -> None:
         """status는 fake_robot이 이미 Envelope 형태의 JSON으로 발행하므로 그대로 전달한다."""
+        if self.lease and not self.lease.active():
+            return
         try:
             payload = json.loads(msg.data)
         except json.JSONDecodeError:
@@ -153,6 +162,8 @@ class RosKafkaBridgeNode(Node):
 
     def _on_ack(self, robot_id: str, msg: String) -> None:
         """ack는 fake_robot이 JSON으로 발행하므로 그대로 ack.robot 토픽에 전달한다."""
+        if self.lease and not self.lease.active():
+            return
         try:
             payload = json.loads(msg.data)
         except json.JSONDecodeError:
@@ -165,6 +176,8 @@ class RosKafkaBridgeNode(Node):
 
     def _on_kafka_command(self, cmd: dict) -> None:
         """Kafka cmd.robot에서 수신한 Command를 해당 로봇의 ROS 토픽으로 Relay한다."""
+        if self.lease and not self.lease.active():
+            raise RuntimeError('Runtime lease expired')
         robot_id = cmd['robot_id']
         if self.journal:
             try:

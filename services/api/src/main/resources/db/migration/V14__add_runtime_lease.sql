@@ -1,0 +1,1 @@
+ALTER TABLE simulation_runtime_session ADD COLUMN lease_expires_at TIMESTAMPTZ;

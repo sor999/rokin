@@ -6,6 +6,7 @@ import json
 import uuid
 import datetime
 
+from .runtime_lease import topic_prefix
 from .logic import FakeRobotLogic
 from .commands import RobotCommands
 from .durability import journal_from_env
@@ -13,11 +14,13 @@ import os
 import sqlite3
 
 class FakeRobotNode(Node):
-    def __init__(self, node_name='fake_robot_node', **kwargs):
+    def __init__(self, node_name='fake_robot_node', lease=None, **kwargs):
+        self.lease = lease
         super().__init__(node_name, **kwargs)
 
         # Declare parameters
         self.declare_parameter('robot_id', 'robot_1')
+        self.declare_parameter('fleet_id', os.environ.get('FLEET_ID', 'default'))
         self.declare_parameter('simulation_runtime_id', '')
         self.declare_parameter('publish_rate_hz', 2.0)
         self.declare_parameter('speed', 1.0)
@@ -30,7 +33,7 @@ class FakeRobotNode(Node):
         # Get parameters
         self.journal = journal_from_env()
         self.delivery_healthy = True
-        self.fleet_id = os.environ.get('FLEET_ID', 'default')
+        self.fleet_id = self.get_parameter('fleet_id').value
         self.robot_id = self.get_parameter('robot_id').value
         if self.journal:
             self.journal.recover(self.fleet_id, self.robot_id)
@@ -50,15 +53,17 @@ class FakeRobotNode(Node):
             max_entries=self.get_parameter('command_dedup_max_entries').value,
         )
 
+        prefix=topic_prefix(self.robot_id, self.get_parameter('simulation_runtime_id').value if lease else None)
+
         # Publishers
-        self.pose_pub = self.create_publisher(Pose2D, f'/fleet/{self.robot_id}/pose', 10)
-        self.battery_pub = self.create_publisher(Float32, f'/fleet/{self.robot_id}/battery', 10)
-        self.status_pub = self.create_publisher(String, f'/fleet/{self.robot_id}/status', 10)
-        self.ack_pub = self.create_publisher(String, f'/fleet/{self.robot_id}/ack', 10)
+        self.pose_pub = self.create_publisher(Pose2D, f'{prefix}/pose', 10)
+        self.battery_pub = self.create_publisher(Float32, f'{prefix}/battery', 10)
+        self.status_pub = self.create_publisher(String, f'{prefix}/status', 10)
+        self.ack_pub = self.create_publisher(String, f'{prefix}/ack', 10)
 
         # Subscriber
         self.cmd_sub = self.create_subscription(
-            String, f'/fleet/{self.robot_id}/cmd', self.cmd_callback, 10
+            String, f'{prefix}/cmd', self.cmd_callback, 10
         )
 
         # Timer
@@ -90,12 +95,20 @@ class FakeRobotNode(Node):
         self.ack_pub.publish(msg)
 
     def cmd_callback(self, msg):
+        if self.lease and not self.lease.active():
+            self.logic.stop()
+            return
         try:
             cmd_payload = json.loads(msg.data)
             cmd_id = cmd_payload.get('cmd_id')
             command = cmd_payload.get('command')
             data = cmd_payload.get('data', {})
 
+            runtime = self.get_parameter('simulation_runtime_id').value
+            if runtime and (cmd_payload.get('simulation_runtime_id') != runtime or
+                            cmd_payload.get('fleet_id') != self.fleet_id or cmd_payload.get('robot_id') != self.robot_id or
+                            self.lease and (type(cmd_payload.get('simulation_epoch')) is not int or cmd_payload.get('simulation_epoch') != self.lease.epoch)):
+                raise ValueError('Command belongs to another runtime generation')
             self.get_logger().info(f"Received command: {command}")
 
             if self.journal:
@@ -104,10 +117,10 @@ class FakeRobotNode(Node):
                 runtime = self.get_parameter('simulation_runtime_id').value
                 if runtime and cmd_payload.get('simulation_runtime_id') != runtime:
                     raise ValueError('Command belongs to a previous runtime')
-                for ack in self.journal.execute(cmd_payload, lambda: self.commands.handle(cmd_id, command, data)):
+                for ack in self.journal.execute(cmd_payload, lambda: self._apply_command(cmd_id, command, data)):
                     self._publish_durable_ack(ack)
             else:
-                for ack in self.commands.handle(cmd_id, command, data):
+                for ack in self._apply_command(cmd_id, command, data):
                     self._publish_ack(ack.cmd_id, ack.status, ack.message)
 
         except (sqlite3.Error, OSError, RuntimeError) as error:
@@ -116,6 +129,13 @@ class FakeRobotNode(Node):
             self.get_logger().error(f'Durable command storage unavailable: {type(error).__name__}')
         except (ValueError, TypeError, AttributeError, OverflowError, KeyError) as error:
             self.get_logger().error(f"Invalid command: {error}")
+
+    def _apply_command(self,cmd_id,command,data):
+        """저널 기록 후 실제 동작 적용 직전에도 로컬 실행 기한을 확인한다."""
+        if self.lease and not self.lease.active():
+            self.logic.stop()
+            raise RuntimeError('Runtime lease expired')
+        return self.commands.handle(cmd_id,command,data)
 
     def _publish_durable_ack(self, payload):
         msg = String()
@@ -131,6 +151,9 @@ class FakeRobotNode(Node):
         return super().destroy_node()
 
     def timer_callback(self):
+        if self.lease and not self.lease.active():
+            self.logic.stop()
+            return
         # Update logic
         self.logic.update(self.dt)
 
@@ -148,6 +171,9 @@ class FakeRobotNode(Node):
             else:
                 self._publish_ack(ack.cmd_id, ack.status, ack.message, {"x": x, "y": y})
 
+        if self.lease and not self.lease.active():
+            self.logic.stop()
+            return
         # Publish Pose
         x, y = self.logic.get_pose()
         pose_msg = Pose2D()

@@ -58,3 +58,9 @@ executeInTransaction=false를 지정한다. 신규 V5에는 런타임 메타데�
 Flyway의 PostgreSQL advisory lock은 spring.flyway.postgresql.transactional-lock=false로
 세션 잠금을 사용한다. 동시 인덱스 생성이 Flyway 자체 트랜잭션을 기다리는 상황을 방지한다.
 설정 근거: https://documentation.red-gate.com/flyway/reference/configuration/flyway-namespace/flyway-postgresql-namespace/flyway-postgresql-transactional-lock-setting
+
+## 단일 활성 및 대기 인계 보완
+
+lease 모드의 소유권과 갱신 및 만료 정책은 [ADR 0010](0010-runtime-lease-failover.md)으로
+대체한다. 이 모드에서는 epoch별 command group과 runtime별 DDS 경로를 사용한다.
+Fleet당 활성 실행 하나라는 제한과 정적 Bridge 계약은 유지한다.

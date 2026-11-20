@@ -104,3 +104,13 @@ Worker는 같은 group에서 텔레메트리와 Ack를 서로 다른 Consumer �
 파티션별 고정 배치와 예약 예산으로 DB 장애 시 소비를 중지하고, 할당 세대로 이전
 작업의 커밋을 차단한다. [ADR 0009](docs/decisions/0009-worker-backpressure.md)와
 [부하 및 장애 검증](docs/features/worker-backpressure.md)에 상한과 재처리 계약을 기록한다.
+
+## 단일 활성 ROS 런타임의 장애 인계
+
+API의 PostgreSQL lease와 epoch로 Fleet당 활성 관리 런타임을 하나로 제한한다. 대기
+런타임은 명령 Consumer와 로봇을 생성하지 않는다. 만료된 실행은 로컬 기한으로 명령과
+이동 갱신을 중단하며, 새 실행은 저장된 시작 위치와 초기 배터리로 복구한다. runtime별
+ROS 토픽과 epoch별 Kafka group으로 이전 실행을 격리한다. 서버별 영속 볼륨은 공유하지
+않으며 과거 명령의 결과는 해당 디스크가 복구된 뒤 회수한다.
+[ADR 0010](docs/decisions/0010-runtime-lease-failover.md)과
+[실행 및 검증](docs/features/runtime-failover.md)에 조건과 전환 절차를 기록한다.
