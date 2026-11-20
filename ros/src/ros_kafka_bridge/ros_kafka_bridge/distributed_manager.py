@@ -168,16 +168,22 @@ class DistributedManager(Node):
                 continue
             if entry['state'] == 'RELEASING':
                 node = self.nodes.get(robot)
-                pending = self.journal and self.journal.pending_robot(self.fleet, robot)
-                idle = node is None or node.logic.get_status() in ('idle', 'arrived')
-                if entry['desiredState'] == 'DELETED' or (idle and not pending):
-                    self.assignments.released(robot, entry['executionId'])
-                    self.stop_robot(robot)
-                    self.releases.put_nowait({
-                        'robotId': robot,
-                        'executionId': entry['executionId'],
-                        'assignmentVersion': entry['assignmentVersion'],
-                    })
+                if entry['desiredState'] != 'DELETED':
+                    if node is not None and node.logic.get_status() not in ('idle', 'arrived'):
+                        continue
+                    try:
+                        if self.journal and self.journal.pending_robot(self.fleet, robot):
+                            continue
+                    except Exception:
+                        self.get_logger().warning('Release deferred; durable inbox unavailable')
+                        continue
+                self.assignments.released(robot, entry['executionId'])
+                self.stop_robot(robot)
+                self.releases.put_nowait({
+                    'robotId': robot,
+                    'executionId': entry['executionId'],
+                    'assignmentVersion': entry['assignmentVersion'],
+                })
                 continue
             state = 'STARTING'
             error = None

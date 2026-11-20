@@ -131,3 +131,34 @@ class DistributedManagerTest(unittest.TestCase):
                 manager.destroy_node()
             executor.shutdown()
             rclpy.shutdown()
+
+    def test_unavailable_journal_defers_normal_release_but_does_not_prevent_deletion(self):
+        import queue
+        from types import SimpleNamespace
+        from ros_kafka_bridge.distributed_manager import DistributedManager
+
+        entries = {
+            robot: dict(state='RELEASING', desiredState=desired,
+                        executionId=str(uuid.uuid4()), assignmentVersion=1)
+            for robot, desired in [('waiting', 'RUNNING'), ('deleted', 'DELETED')]
+        }
+        assignments = Mock()
+        assignments.active.return_value = True
+        assignments.snapshot.return_value = entries
+        journal = Mock()
+        journal.pending_robot.side_effect = OSError('storage unavailable')
+        manager = SimpleNamespace(
+            assignments=assignments, journal=journal, fleet='test',
+            nodes={robot: SimpleNamespace(logic=Mock(get_status=Mock(return_value='idle')))
+                   for robot in entries},
+            executions={robot: entry['executionId'] for robot, entry in entries.items()},
+            stop_robot=Mock(), get_logger=Mock(return_value=Mock()),
+            releases=queue.Queue(), reports=queue.Queue(maxsize=1))
+
+        DistributedManager.tick(manager)
+
+        journal.pending_robot.assert_called_once_with('test', 'waiting')
+        manager.stop_robot.assert_called_once_with('deleted')
+        assignments.released.assert_called_once_with('deleted', entries['deleted']['executionId'])
+        self.assertEqual('deleted', manager.releases.get_nowait()['robotId'])
+        self.assertTrue(manager.releases.empty())
